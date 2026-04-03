@@ -4,97 +4,6 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { FileUploader } from "@/components/ui/file-uploader"
 import { Scene } from "@/components/viewer/scene"
 
-/* ------------------------------------------------------------------ */
-/*  Animated point-cloud mark — particles spiral into an eye          */
-/* ------------------------------------------------------------------ */
-
-function PointCloudMark() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    const dpr = window.devicePixelRatio
-    const w = 56
-    const h = 48
-    canvas.width = w * dpr
-    canvas.height = h * dpr
-    ctx.scale(dpr, dpr)
-
-    type Pt = {
-      tx: number; ty: number
-      x: number; y: number
-      ox: number; oy: number
-      phase: number
-      speed: number
-    }
-
-    const pts: Pt[] = Array.from({ length: 60 }, (_, i) => {
-      const a = (i / 60) * Math.PI * 2
-      const r = i % 2 === 0 ? 16 + Math.random() * 6 : 8 + Math.random() * 4
-      return {
-        tx: w / 2 + Math.cos(a) * r * (0.6 + Math.random() * 0.4),
-        ty: h / 2 + Math.sin(a) * r * (0.4 + Math.random() * 0.6),
-        x: Math.random() * w,
-        y: Math.random() * h,
-        ox: Math.random() * w,
-        oy: Math.random() * h,
-        phase: Math.random() * Math.PI * 2,
-        speed: 0.004 + Math.random() * 0.008,
-      }
-    })
-
-    let t = 0
-    let animId: number
-
-    const tick = () => {
-      ctx.clearRect(0, 0, w, h)
-      t += 1
-
-      // Eye outline
-      const cx = w / 2
-      const cy = h / 2
-      const er = 18
-
-      // Draw iris as scattered points
-      for (const p of pts) {
-        const drift = Math.sin(t * p.speed + p.phase) * 3
-        const targetX = p.tx + drift
-        const targetY = p.ty + Math.cos(t * p.speed * 0.7 + p.phase) * 2
-        p.x += (targetX - p.x) * 0.06
-        p.y += (targetY - p.y) * 0.06
-
-        const alpha = 0.3 + Math.sin(t * 0.02 + p.phase) * 0.2
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, 0.8, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(167,139,250,${alpha})`
-        ctx.fill()
-      }
-
-      // Center dot
-      const pulse = 0.5 + Math.sin(t * 0.03) * 0.3
-      ctx.beginPath()
-      ctx.arc(cx, cy, 1.5, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(216,180,254,${pulse})`
-      ctx.fill()
-
-      animId = requestAnimationFrame(tick)
-    }
-    tick()
-    return () => cancelAnimationFrame(animId)
-  }, [])
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="w-14 h-12 pointer-events-none"
-      style={{ imageRendering: "crisp-edges" }}
-    />
-  )
-}
 
 /* ------------------------------------------------------------------ */
 /*  Floating orbs                                                      */
@@ -245,9 +154,13 @@ export function HeroSection() {
           transition: "all 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s",
         }}
       >
-        {/* On-brand digicon — animated point cloud */}
+        {/* On-brand digicon */}
         <div className="mb-8">
-          <PointCloudMark />
+          <img
+            src="/digicon.png"
+            alt="EideticVision mark"
+            className="w-16 h-auto pointer-events-none opacity-90"
+          />
         </div>
 
         {/* Title */}
