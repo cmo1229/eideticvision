@@ -131,11 +131,25 @@ export function HeroSection() {
 
   return (
     <section className="relative min-h-[calc(100vh-3.5rem)] flex flex-col items-center justify-center overflow-hidden">
-      {/* Layers */}
-      <div className="absolute inset-0 bg-[#030305]" />
+      {/* Background video */}
+      <div className="absolute inset-0 z-0">
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          className="w-full h-full object-cover"
+        >
+          <source src="/background.mp4" type="video/mp4" />
+        </video>
+      </div>
+
+      {/* Overlays to keep text readable */}
+      <div className="absolute inset-0 z-[1] bg-black/70" />
+      <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#030305] via-[#030305]/40 to-[#030305]/60" />
+
       <FloatingOrbs />
       <NoiseOverlay />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#030305] via-transparent to-[#030305]/60" />
 
       {/* Content */}
       <div
