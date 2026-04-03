@@ -13,8 +13,26 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Eidetic — Spatial Memories",
+  title: "EideticVision",
   description: "Upload, process, and explore your spatial captures as 3D scenes.",
+  openGraph: {
+    title: "EideticVision",
+    description: "Upload, process, and explore your spatial captures as 3D scenes.",
+    images: [
+      {
+        url: "/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "EideticVision — Spatial Memories, Rendered",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "EideticVision",
+    description: "Upload, process, and explore your spatial captures as 3D scenes.",
+    images: ["/opengraph-image.png"],
+  },
   icons: {
     icon: "/favicon.svg",
   },
