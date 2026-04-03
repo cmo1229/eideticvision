@@ -223,7 +223,7 @@ export function HeroSection() {
           playsInline
           preload="auto"
           className="w-full h-full object-cover"
-          style={{ filter: "brightness(1.2)" }}
+          style={{ filter: "brightness(1)" }}
         >
           <source src="/background.mp4" type="video/mp4" />
         </video>
