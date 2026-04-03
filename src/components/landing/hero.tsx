@@ -230,8 +230,8 @@ export function HeroSection() {
       </div>
 
       {/* Dim overlays */}
-      <div className="absolute inset-0 z-[1] bg-black/50" />
-      <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#030305] via-[#030305]/30 to-[#030305]/50" />
+      <div className="absolute inset-0 z-[1] bg-black/70" />
+      <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#030305] via-[#030305]/40 to-[#030305]/60" />
 
       <FloatingOrbs />
       <NoiseOverlay />
