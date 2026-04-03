@@ -245,21 +245,20 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
   return (
     <div className="relative w-full">
       {/* Style selector */}
-      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
-        <span className="text-xs text-neutral-500 uppercase tracking-widest mr-2 shrink-0">Style</span>
+      <div className="flex items-center gap-0 mb-5 overflow-x-auto pb-1">
         {PRESETS.map((p) => (
           <button
             key={p.id}
             onClick={() => setActiveStyle(p)}
             className={`
-              shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+              shrink-0 px-5 py-1.5 text-[11px] tracking-[0.25em] uppercase transition-all duration-700 border
               ${activeStyle.id === p.id
-                ? "bg-violet-600 text-white shadow-lg shadow-violet-600/25"
-                : "bg-neutral-800/80 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
+                ? "border-violet-500/40 text-violet-300 bg-violet-500/[0.04]"
+                : "border-neutral-800/40 text-neutral-700 hover:text-neutral-500 hover:border-neutral-700"
               }
             `}
           >
-            {p.icon} {p.label}
+            {p.label}
           </button>
         ))}
       </div>
@@ -267,11 +266,11 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className="relative w-full h-[75vh] rounded-2xl overflow-hidden border border-neutral-800 bg-[#050505]"
+        className="relative w-full h-[75vh] overflow-hidden border border-neutral-800/30 bg-[#030305]"
       >
         <Canvas
           camera={{ position: [0, 2, 5], fov: 50 }}
-          style={{ background: "#050505" }}
+          style={{ background: "#030305" }}
         >
           <ambientLight intensity={preset.ambientIntensity} />
           <directionalLight position={[5, 5, 5]} intensity={preset.dirIntensity} />
@@ -283,31 +282,29 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
       </div>
 
       {/* Action bar */}
-      <div className="flex items-center justify-between mt-4">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between mt-5">
+        <div className="flex items-center gap-4">
           {recording ? (
-            <>
-              <button
-                onClick={stopRecording}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
-              >
-                <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-                Recording — <span className="tabular-nums font-mono">{((Date.now() / 1000) % 60).toFixed(0)}s</span>
-              </button>
-            </>
+            <button
+              onClick={stopRecording}
+              className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-red-400/70 hover:text-red-400 transition-colors"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+              recording
+            </button>
           ) : (
             <button
               onClick={startRecording}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors"
+              className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors"
             >
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-              Record
+              <span className="w-1.5 h-1.5 rounded-full bg-neutral-600 group-hover:bg-neutral-400" />
+              record
             </button>
           )}
         </div>
 
-        <p className="text-xs text-neutral-600">
-          Drag to orbit · Scroll to zoom · Right-drag to pan
+        <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-800">
+          orbit · zoom · pan
         </p>
       </div>
     </div>
