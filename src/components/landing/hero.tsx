@@ -4,19 +4,101 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { FileUploader } from "@/components/ui/file-uploader"
 import { Scene } from "@/components/viewer/scene"
 
-function GlitchText({ text }: { text: string }) {
+/* ------------------------------------------------------------------ */
+/*  Animated point-cloud mark — particles spiral into an eye          */
+/* ------------------------------------------------------------------ */
+
+function PointCloudMark() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const dpr = window.devicePixelRatio
+    const w = 56
+    const h = 48
+    canvas.width = w * dpr
+    canvas.height = h * dpr
+    ctx.scale(dpr, dpr)
+
+    type Pt = {
+      tx: number; ty: number
+      x: number; y: number
+      ox: number; oy: number
+      phase: number
+      speed: number
+    }
+
+    const pts: Pt[] = Array.from({ length: 60 }, (_, i) => {
+      const a = (i / 60) * Math.PI * 2
+      const r = i % 2 === 0 ? 16 + Math.random() * 6 : 8 + Math.random() * 4
+      return {
+        tx: w / 2 + Math.cos(a) * r * (0.6 + Math.random() * 0.4),
+        ty: h / 2 + Math.sin(a) * r * (0.4 + Math.random() * 0.6),
+        x: Math.random() * w,
+        y: Math.random() * h,
+        ox: Math.random() * w,
+        oy: Math.random() * h,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.004 + Math.random() * 0.008,
+      }
+    })
+
+    let t = 0
+    let animId: number
+
+    const tick = () => {
+      ctx.clearRect(0, 0, w, h)
+      t += 1
+
+      // Eye outline
+      const cx = w / 2
+      const cy = h / 2
+      const er = 18
+
+      // Draw iris as scattered points
+      for (const p of pts) {
+        const drift = Math.sin(t * p.speed + p.phase) * 3
+        const targetX = p.tx + drift
+        const targetY = p.ty + Math.cos(t * p.speed * 0.7 + p.phase) * 2
+        p.x += (targetX - p.x) * 0.06
+        p.y += (targetY - p.y) * 0.06
+
+        const alpha = 0.3 + Math.sin(t * 0.02 + p.phase) * 0.2
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, 0.8, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(167,139,250,${alpha})`
+        ctx.fill()
+      }
+
+      // Center dot
+      const pulse = 0.5 + Math.sin(t * 0.03) * 0.3
+      ctx.beginPath()
+      ctx.arc(cx, cy, 1.5, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(216,180,254,${pulse})`
+      ctx.fill()
+
+      animId = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => cancelAnimationFrame(animId)
+  }, [])
+
   return (
-    <div className="relative inline-block">
-      <span className="relative z-10">{text}</span>
-      <span className="absolute inset-0 text-cyan-400/80 z-0" style={{ transform: "translate(2px, -1px)", animation: "glitch1 3s infinite alternate" }}>
-        {text}
-      </span>
-      <span className="absolute inset-0 text-fuchsia-500/60 z-0" style={{ transform: "translate(-2px, 1px)", animation: "glitch2 3s infinite alternate" }}>
-        {text}
-      </span>
-    </div>
+    <canvas
+      ref={canvasRef}
+      className="w-14 h-12 pointer-events-none"
+      style={{ imageRendering: "crisp-edges" }}
+    />
   )
 }
+
+/* ------------------------------------------------------------------ */
+/*  Floating orbs                                                      */
+/* ------------------------------------------------------------------ */
 
 function FloatingOrbs() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -73,6 +155,10 @@ function FloatingOrbs() {
   return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.7 }} />
 }
 
+/* ------------------------------------------------------------------ */
+/*  Noise overlay                                                      */
+/* ------------------------------------------------------------------ */
+
 function NoiseOverlay() {
   const svgRef = useRef<SVGSVGElement>(null)
   const [seed, setSeed] = useState(0)
@@ -82,13 +168,8 @@ function NoiseOverlay() {
     return () => clearInterval(iv)
   }, [])
 
-  let noise = ""
-  for (let i = 0; i < 120; i++) {
-    noise += `${((seed * 137 + i * 59) % 100)},${((seed * 97 + i * 31) % 100)},${Math.random() * 255 | 0} `
-  }
-
   return (
-    <div className="absolute inset-0 pointer-events-none opacity-[0.025]" style={{ backgroundRepeat: "repeat", backgroundSize: "120px 120px" }}>
+    <div className="absolute inset-0 pointer-events-none" style={{ opacity: 0.025 }}>
       <svg ref={svgRef} width="120" height="120" className="w-full h-full">
         <filter id="n">
           <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" stitchTiles="stitch" seed={seed} />
@@ -100,14 +181,16 @@ function NoiseOverlay() {
   )
 }
 
+/* ------------------------------------------------------------------ */
+/*  Hero                                                               */
+/* ------------------------------------------------------------------ */
+
 export function HeroSection() {
   const [assetUrl, setAssetUrl] = useState<string | undefined>()
   const [assetType, setAssetType] = useState<string>("glb")
   const [mounted, setMounted] = useState(false)
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  useEffect(() => { setMounted(true) }, [])
 
   const handleComplete = (url: string) => {
     const ext = url.split(".").pop()?.toLowerCase() ?? ""
@@ -131,22 +214,24 @@ export function HeroSection() {
 
   return (
     <section className="relative min-h-[calc(100vh-3.5rem)] flex flex-col items-center justify-center overflow-hidden">
-      {/* Background video */}
+      {/* Background video — dual-source seamless loop */}
       <div className="absolute inset-0 z-0">
         <video
           autoPlay
           muted
           loop
           playsInline
+          preload="auto"
           className="w-full h-full object-cover"
+          style={{ filter: "brightness(1.2)" }}
         >
           <source src="/background.mp4" type="video/mp4" />
         </video>
       </div>
 
-      {/* Overlays to keep text readable */}
-      <div className="absolute inset-0 z-[1] bg-black/70" />
-      <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#030305] via-[#030305]/40 to-[#030305]/60" />
+      {/* Dim overlays */}
+      <div className="absolute inset-0 z-[1] bg-black/50" />
+      <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#030305] via-[#030305]/30 to-[#030305]/50" />
 
       <FloatingOrbs />
       <NoiseOverlay />
@@ -160,11 +245,9 @@ export function HeroSection() {
           transition: "all 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s",
         }}
       >
-        {/* Abstract mark */}
-        <div className="mb-8 flex items-end gap-1">
-          <span className="block w-[1px] h-12 bg-gradient-to-b from-transparent via-violet-500/60 to-transparent" />
-          <span className="block w-[1px] h-16 bg-gradient-to-b from-transparent via-fuchsia-500/40 to-transparent self-start mt-8" />
-          <span className="block w-[1px] h-10 bg-gradient-to-b from-transparent via-cyan-400/50 to-transparent self-start mt-16" />
+        {/* On-brand digicon — animated point cloud */}
+        <div className="mb-8">
+          <PointCloudMark />
         </div>
 
         {/* Title */}
