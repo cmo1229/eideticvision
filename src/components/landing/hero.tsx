@@ -154,15 +154,6 @@ export function HeroSection() {
           transition: "all 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s",
         }}
       >
-        {/* On-brand digicon */}
-        <div className="mb-8">
-          <img
-            src="/digicon.png"
-            alt="EideticVision mark"
-            className="w-16 h-auto pointer-events-none opacity-90"
-          />
-        </div>
-
         {/* Title */}
         <h1 className="text-[11vw] md:text-[9rem] font-extralight tracking-[-0.04em] leading-[0.85] text-center select-none">
           <span className="block text-neutral-800">Eidetic</span>
