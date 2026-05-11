@@ -326,6 +326,17 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
   const [neuralVideo, setNeuralVideo] = useState<string | null>(null)
   const [neuralError, setNeuralError] = useState<string | null>(null)
   const [showNeural, setShowNeural] = useState(false)
+  const [neuralProgress, setNeuralProgress] = useState(0)
+  const [neuralPhase, setNeuralPhase] = useState("")
+  const neuralTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const NEURAL_PHASES = [
+    { at: 0, label: "capturing frame" },
+    { at: 15, label: "sending to runway" },
+    { at: 35, label: "Gen-4.5 processing" },
+    { at: 60, label: "rendering neural memory" },
+    { at: 85, label: "almost there" },
+  ]
 
   /* re-live mode */
   const [reliving, setReliving] = useState(false)
@@ -426,6 +437,32 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
 
     setNeuralGenerating(true)
     setNeuralError(null)
+    setNeuralProgress(0)
+    setNeuralPhase(NEURAL_PHASES[0].label)
+
+    // Simulated progress curve: fast ramp → slow middle → creep near end
+    let p = 0
+    const startTime = Date.now()
+    const updatePhase = (progress: number) => {
+      const phase = [...NEURAL_PHASES].reverse().find((ph) => progress >= ph.at)
+      if (phase) setNeuralPhase(phase.label)
+    }
+    neuralTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime
+      if (p < 20) {
+        p += 1.2 // fast start
+      } else if (p < 55) {
+        p += 0.35 // medium
+      } else if (p < 80) {
+        p += 0.15 + Math.random() * 0.08 // slow with jitter
+      } else if (p < 92) {
+        p += 0.03 + Math.random() * 0.03 // very slow creep
+      }
+      // cap at 94% until real completion
+      p = Math.min(p, 94)
+      setNeuralProgress(p)
+      updatePhase(p)
+    }, 250)
 
     try {
       const frameUrl = canvas.toDataURL("image/jpeg", 0.9)
@@ -436,9 +473,18 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
         prompt,
         duration: 5,
       })
+
+      // Completion burst
+      if (neuralTimerRef.current) clearInterval(neuralTimerRef.current)
+      setNeuralProgress(100)
+      setNeuralPhase("memory captured")
+      // Brief pause at 100% before revealing
+      await new Promise((r) => setTimeout(r, 600))
+
       setNeuralVideo(data.videoUrls[0] ?? null)
       setShowNeural(true)
     } catch (err: any) {
+      if (neuralTimerRef.current) clearInterval(neuralTimerRef.current)
       setNeuralError(err.response?.data?.error ?? err.message ?? "Generation failed")
     } finally {
       setNeuralGenerating(false)
@@ -551,6 +597,50 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
           {reliving ? "re-living memory" : "orbit · zoom · pan"}
         </p>
       </div>
+
+      {/* Neural memory generation loading overlay */}
+      {neuralGenerating && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="max-w-sm w-full px-8">
+            {/* Phase label */}
+            <p className="text-[11px] tracking-[0.3em] uppercase text-violet-400/80 text-center mb-6 animate-pulse">
+              {neuralPhase}
+            </p>
+
+            {/* Progress track */}
+            <div className="relative w-full h-[1px] bg-neutral-800/60 overflow-visible">
+              {/* Fill bar */}
+              <div
+                className="absolute inset-y-0 left-0 bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-400 transition-all duration-300 ease-out"
+                style={{ width: `${neuralProgress}%` }}
+              />
+              {/* Shimmer sweep */}
+              <div
+                className="absolute inset-y-0 w-20 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                style={{
+                  left: `${neuralProgress}%`,
+                  transform: "translateX(-50%)",
+                }}
+              />
+              {/* Glowing dot at the leading edge */}
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)] transition-all duration-300 ease-out"
+                style={{ left: `${neuralProgress}%` }}
+              />
+            </div>
+
+            {/* Percentage */}
+            <p className="text-[10px] tracking-[0.2em] uppercase text-neutral-600 text-center mt-4 tabular-nums">
+              {Math.round(neuralProgress)}%
+            </p>
+
+            {/* Style label */}
+            <p className="text-[9px] tracking-[0.25em] uppercase text-neutral-700 text-center mt-6">
+              {activeStyle.label} · gen4.5
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Neural memory overlay */}
       {showNeural && neuralVideo && (
