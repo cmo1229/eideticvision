@@ -80,16 +80,15 @@ function loadDepthData(depthDataUrl: string): Promise<Float32Array> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Full 360° navigable world — cylinder you can walk through            */
+/*  Open terrain world — depth becomes hills, no walls, fades to fog     */
 /* ------------------------------------------------------------------ */
 
-const SEGS_AROUND = 220
-const SEGS_VERT = 110
-const CYL_RADIUS = 14
-const CYL_HEIGHT = 10
-const DEPTH_SCALE = 6.0
+const TERRAIN_SIZE = 40
+const TERRAIN_SEGS = 200
+const TERRAIN_MAX_HEIGHT = 10
+const DEPTH_SCALE = 8.0
 
-function buildCylinderGeometry(depthData: Float32Array): THREE.BufferGeometry {
+function buildTerrainGeometry(depthData: Float32Array): THREE.BufferGeometry {
   const dw = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
   const dh = dw
 
@@ -97,47 +96,43 @@ function buildCylinderGeometry(depthData: Float32Array): THREE.BufferGeometry {
   const uvs: number[] = []
   const indices: number[] = []
 
-  for (let iy = 0; iy <= SEGS_VERT; iy++) {
-    const v = iy / SEGS_VERT
-    const y = (0.5 - v) * CYL_HEIGHT
+  for (let iy = 0; iy <= TERRAIN_SEGS; iy++) {
+    const v = iy / TERRAIN_SEGS
+    const z = (0.5 - v) * TERRAIN_SIZE
 
-    for (let ia = 0; ia <= SEGS_AROUND; ia++) {
-      const u = ia / SEGS_AROUND
-      const angle = u * Math.PI * 2
+    for (let ix = 0; ix <= TERRAIN_SEGS; ix++) {
+      const u = ix / TERRAIN_SEGS
+      const x = (u - 0.5) * TERRAIN_SIZE
 
-      // Cylinder base position
-      const sx = CYL_RADIUS * Math.sin(angle)
-      const sz = CYL_RADIUS * Math.cos(angle)
+      // Distance from center for edge falloff
+      const distFromCenter = Math.sqrt(
+        (u - 0.5) ** 2 + (v - 0.5) ** 2
+      ) / 0.7 // normalized, 0 at center, ~1 at edges
 
-      // Depth: map texture UV to depth map
-      // Video covers front 220°, depth fades toward back
+      // Depth sample
       const px = Math.floor(u * (dw - 1))
       const py = Math.floor((1 - v) * (dh - 1))
       const idx = Math.min(py * dw + px, depthData.length - 1)
       const rawDepth = depthData[idx] ?? 0
 
-      // Falloff: full depth at front (angle near 0), reduced at sides/back
-      const frontness = Math.max(0, Math.cos(angle) * 0.7 + 0.3)
-      const depth = rawDepth * frontness
+      // Height: depth creates terrain elevation
+      // Close objects (depth=1) = tall, far objects (depth=0) = ground
+      const height = rawDepth * TERRAIN_MAX_HEIGHT
 
-      // Radial normal
-      const nx = Math.sin(angle)
-      const nz = Math.cos(angle)
+      // Edge falloff: terrain sinks back to ground at edges
+      const edgeFade = distFromCenter > 0.55
+        ? Math.max(0, 1 - (distFromCenter - 0.55) / 0.45)
+        : 1
 
-      // Push vertex inward (toward viewer) by depth amount
-      vertices.push(
-        sx - nx * depth * DEPTH_SCALE,
-        y,
-        sz - nz * depth * DEPTH_SCALE
-      )
+      vertices.push(x, height * edgeFade, z)
       uvs.push(u, v)
     }
   }
 
-  for (let iy = 0; iy < SEGS_VERT; iy++) {
-    for (let ia = 0; ia < SEGS_AROUND; ia++) {
-      const a = iy * (SEGS_AROUND + 1) + ia
-      const b = a + SEGS_AROUND + 1
+  for (let iy = 0; iy < TERRAIN_SEGS; iy++) {
+    for (let ix = 0; ix < TERRAIN_SEGS; ix++) {
+      const a = iy * (TERRAIN_SEGS + 1) + ix
+      const b = a + TERRAIN_SEGS + 1
       indices.push(a, b, a + 1, b, b + 1, a + 1)
     }
   }
@@ -176,7 +171,7 @@ function DepthMesh({
       if (sourceType === "text") {
         // Text prompt: no source image, use flat depth (all zeros) for gentle curve
         const flatDepth = new Float32Array(256 * 256) // all zeros
-        geo = buildCylinderGeometry(flatDepth)
+        geo = buildTerrainGeometry(flatDepth)
 
         // Video is the texture (or will be swapped in)
         textureUrl = videoUrl ?? imageUrl
@@ -196,7 +191,7 @@ function DepthMesh({
 
         if (cancelled) return
 
-        geo = buildCylinderGeometry(depthData)
+        geo = buildTerrainGeometry(depthData)
         textureUrl = imageUrl
       }
 
@@ -377,13 +372,11 @@ function FreeCamera({ active, intro }: { active: boolean; intro: boolean }) {
       camera.position.add(right.clone().multiplyScalar(speed))
     }
 
-    // Keep camera within cylinder
-    const dist = Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2)
-    if (dist > CYL_RADIUS - 1) {
-      const scale = (CYL_RADIUS - 1) / dist
-      camera.position.x *= scale
-      camera.position.z *= scale
-    }
+    // Keep camera within terrain bounds, above ground
+    const halfTerrain = TERRAIN_SIZE / 2 - 2
+    camera.position.x = Math.max(-halfTerrain, Math.min(halfTerrain, camera.position.x))
+    camera.position.z = Math.max(-halfTerrain, Math.min(halfTerrain, camera.position.z))
+    camera.position.y = Math.max(0.8, camera.position.y)
 
     // Apply look direction
     const lookTarget = new THREE.Vector3(
@@ -407,7 +400,7 @@ function MemoryFog({ mood }: { mood: MoodId }) {
 
   useEffect(() => {
     const fogColor = m.id === "noir" ? "#0a0a0a" : m.id === "warm" ? "#1a1410" : "#030310"
-    scene.fog = new THREE.FogExp2(fogColor, 0.0008)
+    scene.fog = new THREE.FogExp2(fogColor, 0.0012)
     scene.background = new THREE.Color(fogColor)
     return () => {
       scene.fog = null
@@ -425,12 +418,11 @@ function MemoryParticles() {
     const g = new THREE.BufferGeometry()
     const count = 200
     const pos = new Float32Array(count * 3)
+    const halfTerrain = TERRAIN_SIZE / 2
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2
-      const radius = 2 + Math.random() * 12
-      pos[i * 3] = Math.cos(angle) * radius
-      pos[i * 3 + 1] = (Math.random() - 0.5) * CYL_HEIGHT
-      pos[i * 3 + 2] = Math.sin(angle) * radius
+      pos[i * 3] = (Math.random() - 0.5) * TERRAIN_SIZE
+      pos[i * 3 + 1] = 1 + Math.random() * TERRAIN_MAX_HEIGHT
+      pos[i * 3 + 2] = (Math.random() - 0.5) * TERRAIN_SIZE
     }
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3))
     return g
@@ -667,7 +659,7 @@ export function ImageScene({
         )}
 
         <Canvas
-          camera={{ position: [0, 0, 0], fov: 70 }}
+          camera={{ position: [0, 2.5, 8], fov: 65 }}
           style={{ background: "#030305" }}
         >
           <ambientLight intensity={0.5} />
@@ -713,7 +705,7 @@ export function ImageScene({
         </div>
 
         <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-800">
-          wasd to walk · drag to look
+          wasd to walk · mouse to look
         </p>
       </div>
 
