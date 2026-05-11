@@ -3,10 +3,9 @@
 import { useRef, useState, useMemo, useEffect, useCallback } from "react"
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { OrbitControls, useProgress, Environment } from "@react-three/drei"
-import { EffectComposer, Bloom, ColorAverage, Vignette, HueSaturation } from "@react-three/postprocessing"
+import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import { GLTFLoader, PLYLoader } from "three-stdlib"
 import * as THREE from "three"
-import { BlendFunction, Effect, EffectPass } from "postprocessing"
 import axios from "axios"
 
 /* ------------------------------------------------------------------ */
@@ -199,6 +198,112 @@ function SceneEffects({ preset }: { preset: StylePreset }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  MemoryCamera — human-like auto-flythrough                           */
+/* ------------------------------------------------------------------ */
+
+function MemoryCamera({ active, onCycle }: { active: boolean; onCycle: () => void }) {
+  const { camera } = useThree()
+  const timeRef = useRef(0)
+  const saccadeRef = useRef({ x: 0, y: 0, z: 0 })
+  const lastSaccadeRef = useRef(0)
+  const baseTarget = useRef(new THREE.Vector3(0, 0, 0))
+
+  useEffect(() => {
+    if (active) {
+      // Snap to a good starting orbit position
+      camera.position.set(3, 1.5, 4)
+      camera.lookAt(baseTarget.current)
+      timeRef.current = 0
+    }
+  }, [active, camera])
+
+  useFrame((_, delta) => {
+    if (!active) return
+    timeRef.current += delta
+
+    const t = timeRef.current
+
+    // Human-like gaze: layered sine waves at incommensurate frequencies
+    const orbitX = Math.sin(t * 0.23) * 2.5
+    const orbitZ = Math.cos(t * 0.23) * 2.5
+    const verticalBob = Math.sin(t * 0.37 + 1.2) * 0.6
+    const breathing = Math.sin(t * 0.15) * 0.3 + 3.5  // distance
+
+    // Micro-saccades every ~1.5 seconds
+    if (t - lastSaccadeRef.current > 1.2 + Math.random() * 0.8) {
+      saccadeRef.current = {
+        x: (Math.random() - 0.5) * 0.15,
+        y: (Math.random() - 0.5) * 0.1,
+        z: (Math.random() - 0.5) * 0.08,
+      }
+      lastSaccadeRef.current = t
+    }
+
+    // Gradually shift focal point for organic exploration
+    const focalX = Math.sin(t * 0.17 + 0.8) * 0.4
+    const focalY = Math.cos(t * 0.19 + 0.3) * 0.3
+
+    camera.position.x = orbitX + saccadeRef.current.x
+    camera.position.y = 1.5 + verticalBob + saccadeRef.current.y
+    camera.position.z = orbitZ * (breathing / 3) + saccadeRef.current.z
+
+    camera.lookAt(
+      baseTarget.current.x + focalX,
+      baseTarget.current.y + focalY,
+      baseTarget.current.z
+    )
+
+    onCycle()
+  })
+
+  return null
+}
+
+/* ------------------------------------------------------------------ */
+/*  DustParticles — floating light motes                                */
+/* ------------------------------------------------------------------ */
+
+function DustParticles() {
+  const pointsRef = useRef<THREE.Points>(null!)
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry()
+    const count = 120
+    const pos = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 8
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 6
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 8
+    }
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3))
+    return g
+  }, [])
+
+  useFrame((_, delta) => {
+    if (!pointsRef.current) return
+    const pos = pointsRef.current.geometry.attributes.position.array as Float32Array
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i + 1] += Math.sin(Date.now() * 0.001 + i) * delta * 0.08
+      pos[i] += Math.cos(Date.now() * 0.0013 + i) * delta * 0.05
+    }
+    pointsRef.current.geometry.attributes.position.needsUpdate = true
+  })
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry />
+      <pointsMaterial
+        size={0.015}
+        color="#c4b5fd"
+        transparent
+        opacity={0.5}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+      />
+    </points>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /*  Scene wrapper                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -222,7 +327,63 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
   const [neuralError, setNeuralError] = useState<string | null>(null)
   const [showNeural, setShowNeural] = useState(false)
 
+  /* re-live mode */
+  const [reliving, setReliving] = useState(false)
+  const reliveCyclesRef = useRef(0)
+  const reliveMaxCycles = 900 // ~30 seconds at 30fps
+  const reliveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const preset = useMemo(() => PRESETS.find((p) => p.id === activeStyle.id) ?? PRESETS[0], [activeStyle.id])
+
+  /* ---------- re-live ---------- */
+
+  const handleReliveCycle = useCallback(() => {
+    reliveCyclesRef.current += 1
+  }, [])
+
+  const startReliving = useCallback(() => {
+    setReliving(true)
+    reliveCyclesRef.current = 0
+
+    // Auto-start recording
+    const canvas = canvasRef.current?.querySelector("canvas")
+    if (!canvas) return
+    const stream = canvas.captureStream(30)
+    const recorder = new MediaRecorder(stream, {
+      mimeType: RECORDER_MIME,
+      videoBitsPerSecond: 6_000_000,
+    })
+    chunksRef.current = []
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: "video/webm" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `eidetic-memory-${Date.now()}.webm`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+    recorder.start()
+    recorderRef.current = recorder
+    setRecording(true)
+
+    // Auto-stop after ~30 seconds
+    reliveTimeoutRef.current = setTimeout(() => {
+      setReliving(false)
+      recorderRef.current?.stop()
+      recorderRef.current = null
+      setRecording(false)
+    }, 30000)
+  }, [])
+
+  const stopReliving = useCallback(() => {
+    setReliving(false)
+    if (reliveTimeoutRef.current) clearTimeout(reliveTimeoutRef.current)
+    recorderRef.current?.stop()
+    recorderRef.current = null
+    setRecording(false)
+  }, [])
 
   /* ---------- recording ---------- */
 
@@ -319,47 +480,75 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
           <ViewerModel url={assetUrl} type={assetType} />
           <Environment preset={preset.envPreset as any} />
           <SceneEffects preset={preset} />
-          <OrbitControls makeDefault enablePan enableZoom minDistance={1} maxDistance={50} />
+          <DustParticles />
+          <MemoryCamera active={reliving} onCycle={handleReliveCycle} />
+          <OrbitControls
+            makeDefault
+            enablePan={!reliving}
+            enableZoom={!reliving}
+            minDistance={1}
+            maxDistance={50}
+          />
         </Canvas>
       </div>
 
       {/* Action bar */}
       <div className="flex items-center justify-between mt-5">
         <div className="flex items-center gap-6">
-          {recording ? (
+          {reliving ? (
             <button
-              onClick={stopRecording}
-              className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-red-400/70 hover:text-red-400 transition-colors"
+              onClick={stopReliving}
+              className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-amber-400/70 hover:text-amber-300 transition-colors"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-              recording
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              re-living · tap to stop
             </button>
           ) : (
-            <button
-              onClick={startRecording}
-              className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-neutral-600 group-hover:bg-neutral-400" />
-              record
-            </button>
-          )}
+            <>
+              <button
+                onClick={startReliving}
+                className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-amber-500/70 hover:text-amber-400 transition-colors"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500/60" />
+                re-live
+              </button>
 
-          <button
-            onClick={generateNeuralMemory}
-            disabled={neuralGenerating}
-            className={`inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase transition-colors
-              ${neuralGenerating
-                ? "text-violet-400/70 cursor-wait"
-                : "text-neutral-600 hover:text-violet-400"
-              }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${neuralGenerating ? "bg-violet-500 animate-pulse" : "bg-violet-600/50"}`} />
-            {neuralGenerating ? "generating" : "neural memory"}
-          </button>
+              {recording ? (
+                <button
+                  onClick={stopRecording}
+                  className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-red-400/70 hover:text-red-400 transition-colors"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  recording
+                </button>
+              ) : (
+                <button
+                  onClick={startRecording}
+                  className="inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-neutral-600 group-hover:bg-neutral-400" />
+                  record
+                </button>
+              )}
+
+              <button
+                onClick={generateNeuralMemory}
+                disabled={neuralGenerating}
+                className={`inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase transition-colors
+                  ${neuralGenerating
+                    ? "text-violet-400/70 cursor-wait"
+                    : "text-neutral-600 hover:text-violet-400"
+                  }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${neuralGenerating ? "bg-violet-500 animate-pulse" : "bg-violet-600/50"}`} />
+                {neuralGenerating ? "generating" : "neural memory"}
+              </button>
+            </>
+          )}
         </div>
 
         <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-800">
-          orbit · zoom · pan
+          {reliving ? "re-living memory" : "orbit · zoom · pan"}
         </p>
       </div>
 
