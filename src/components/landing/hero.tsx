@@ -6,6 +6,7 @@ import { FileUploader, type UploadedAsset } from "@/components/ui/file-uploader"
 import { PromptInput } from "@/components/ui/prompt-input"
 import { Scene } from "@/components/viewer/scene"
 import { ImageScene } from "@/components/viewer/image-scene"
+import { MOODS, type MoodId } from "@/lib/moods"
 
 
 /* ------------------------------------------------------------------ */
@@ -133,6 +134,9 @@ export function HeroSection() {
   const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
+  // Memory aesthetic mood
+  const [mood, setMood] = useState<MoodId>("lucid")
+
   // Memory stack for chained prompt expansion
   const [memoryStack, setMemoryStack] = useState<string[]>([])
   const [activeMemoryIndex, setActiveMemoryIndex] = useState(0)
@@ -147,7 +151,7 @@ export function HeroSection() {
       setGenError(null)
 
       try {
-        const { data } = await axios.post("/api/generate", { imageUrl: asset.url })
+        const { data } = await axios.post("/api/generate", { imageUrl: asset.url, mood })
         setVideoUrls(data.videoUrls)
         if (data.videoUrls?.[0]) {
           setMemoryStack([data.videoUrls[0]])
@@ -171,7 +175,7 @@ export function HeroSection() {
     setMemoryStack([])
 
     try {
-      const { data } = await axios.post("/api/generate", { promptText, duration: 5 })
+      const { data } = await axios.post("/api/generate", { promptText, mood, duration: 5 })
       setVideoUrls(data.videoUrls)
       if (data.videoUrls?.[0]) {
         setAssetUrl(data.videoUrls[0])
@@ -190,7 +194,7 @@ export function HeroSection() {
     setGenError(null)
 
     try {
-      const { data } = await axios.post("/api/generate", { promptText, duration: 5 })
+      const { data } = await axios.post("/api/generate", { promptText, mood, duration: 5 })
       if (data.videoUrls?.[0]) {
         const newStack = [...memoryStack, data.videoUrls[0]]
         setMemoryStack(newStack)
@@ -230,6 +234,7 @@ export function HeroSection() {
           memoryStack={memoryStack}
           activeMemoryIndex={activeMemoryIndex}
           onMemorySelect={setActiveMemoryIndex}
+          mood={mood}
         />
       </section>
     )
@@ -297,6 +302,24 @@ export function HeroSection() {
 
         {/* How it works - visual steps */}
         <VisualSteps />
+
+        {/* Mood selector */}
+        <div className="mt-10 flex items-center gap-1">
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-700 mr-3">feel</span>
+          {MOODS.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setMood(m.id)}
+              className={`px-3 py-1 text-[10px] tracking-[0.2em] uppercase transition-all duration-500 border
+                ${mood === m.id
+                  ? "border-neutral-600/40 text-neutral-300"
+                  : "border-transparent text-neutral-600 hover:text-neutral-500 hover:border-neutral-800/30"
+                }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
 
         {/* Divider */}
         <div className="mt-12 w-12 h-[1px] bg-gradient-to-r from-transparent via-neutral-700 to-transparent" />

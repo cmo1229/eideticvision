@@ -3,7 +3,10 @@
 import { useRef, useEffect, useState, useMemo } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Environment } from "@react-three/drei"
+import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import * as THREE from "three"
+import { getMood, type MoodId } from "@/lib/moods"
+import { PromptInput } from "@/components/ui/prompt-input"
 
 /* ------------------------------------------------------------------ */
 /*  Client-side depth estimation from image                             */
@@ -205,6 +208,26 @@ function DepthMesh({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Mood post-processing effects                                        */
+/* ------------------------------------------------------------------ */
+
+function MoodEffects({ mood }: { mood: MoodId }) {
+  const m = getMood(mood)
+  return (
+    <EffectComposer enableNormalPass={false} multisampling={0}>
+      <Bloom
+        luminanceThreshold={m.bloom.threshold}
+        luminanceSmoothing={m.bloom.smoothing}
+        intensity={m.bloom.intensity}
+        width={480}
+      />
+      <HueSaturation hue={m.hue} saturation={m.saturation} />
+      <Vignette offset={m.vignette.offset} darkness={m.vignette.darkness} />
+    </EffectComposer>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /*  Generation progress bar                                             */
 /* ------------------------------------------------------------------ */
 
@@ -279,8 +302,6 @@ function GenerationOverlay() {
   )
 }
 
-import { PromptInput } from "@/components/ui/prompt-input"
-
 /* ------------------------------------------------------------------ */
 /*  ImageScene                                                          */
 /* ------------------------------------------------------------------ */
@@ -295,6 +316,7 @@ interface ImageSceneProps {
   memoryStack?: string[]
   activeMemoryIndex?: number
   onMemorySelect?: (index: number) => void
+  mood?: MoodId
 }
 
 export function ImageScene({
@@ -307,6 +329,7 @@ export function ImageScene({
   memoryStack,
   activeMemoryIndex = 0,
   onMemorySelect,
+  mood = "lucid",
 }: ImageSceneProps) {
   const [loaded, setLoaded] = useState(false)
   const [introDone, setIntroDone] = useState(false)
@@ -382,6 +405,7 @@ export function ImageScene({
           />
 
           <Environment preset="night" />
+          <MoodEffects mood={mood} />
           <OrbitControls
             makeDefault
             enablePan
@@ -408,8 +432,11 @@ export function ImageScene({
               <span className="text-[11px] tracking-[0.25em] uppercase text-neutral-500">
                 {activeVideo ? "spatial memory ready" : "capture loaded"}
               </span>
-              <span className="text-[10px] tracking-[0.2em] uppercase text-violet-500/60">
-                depth-aware
+              <span
+                className="text-[10px] tracking-[0.2em] uppercase"
+                style={{ color: getMood(mood).color }}
+              >
+                {getMood(mood).label}
               </span>
             </>
           ) : null}

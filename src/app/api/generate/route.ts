@@ -1,31 +1,29 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateImageToVideo, generateTextToVideo } from "@/lib/services/runway"
+import { getMood } from "@/lib/moods"
 
 export const maxDuration = 300
-
-const STYLE_PROMPTS: Record<string, string> = {
-  dream: "dreamlike, soft focus, ethereal glow, floating particles, cinematic slow motion",
-  noir: "film noir, high contrast, black and white, dramatic shadows, 1940s cinema aesthetic",
-  neon: "cyberpunk, neon lights, synthwave, electric colors, Blade Runner aesthetic",
-  natural: "natural lighting, golden hour, photorealistic, warm sunlight, serene atmosphere",
-  ethereal: "otherworldly, misty, celestial, soft pastels, heavenly atmosphere, floating dust motes",
-}
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { imageUrl, promptText, prompt, style, duration } = body
+    const { imageUrl, promptText, prompt, style, mood, duration } = body
+
+    const selectedMood = getMood(mood as string)
 
     // Text-to-video: generate a world from a text description
     if (promptText) {
-      const output = await generateTextToVideo(promptText, duration ?? 5)
-      return NextResponse.json({ videoUrls: output, type: "text" })
+      // Mood wraps the user prompt: "a cabin in the woods, cinematic widescreen, anamorphic..."
+      const styledPrompt = `${promptText}, ${selectedMood.prompt}`
+
+      const output = await generateTextToVideo(styledPrompt, duration ?? 5)
+      return NextResponse.json({ videoUrls: output, type: "text", mood: selectedMood.id })
     }
 
     // Image-to-video: generate from an uploaded image
     if (imageUrl) {
-      const resolvedPrompt =
-        prompt ?? STYLE_PROMPTS[style as string] ?? STYLE_PROMPTS.ethereal
+      // Style suffix from the selected mood
+      const resolvedPrompt = prompt ?? selectedMood.prompt
 
       const output = await generateImageToVideo(
         imageUrl,
@@ -33,7 +31,7 @@ export async function POST(req: NextRequest) {
         duration ?? 5
       )
 
-      return NextResponse.json({ videoUrls: output, type: "image" })
+      return NextResponse.json({ videoUrls: output, type: "image", mood: selectedMood.id })
     }
 
     return NextResponse.json(
