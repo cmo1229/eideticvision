@@ -135,7 +135,7 @@ function DepthMesh({
           const pixelIdx = (py * depthImg.width + px) * 4
 
           const depth = pixels[pixelIdx] / 255 // grayscale, 0-1
-          pos[i + 2] = orig[i + 2] + depth * 1.2
+          pos[i + 2] = orig[i + 2] + depth * 2.0
         }
 
         geo.attributes.position.needsUpdate = true
@@ -291,8 +291,15 @@ interface ImageSceneProps {
 
 export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }: ImageSceneProps) {
   const [loaded, setLoaded] = useState(false)
-  const [depthReady, setDepthReady] = useState(false)
+  const [introDone, setIntroDone] = useState(false)
   const showVideo = videoUrls && videoUrls.length > 0
+
+  // End intro after 4.5 seconds
+  useEffect(() => {
+    if (!loaded) return
+    const t = setTimeout(() => setIntroDone(true), 4500)
+    return () => clearTimeout(t)
+  }, [loaded])
 
   return (
     <div className="relative w-full">
@@ -338,6 +345,8 @@ export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }:
             minDistance={1.5}
             maxDistance={12}
             target={[0, 0, 0.5]}
+            autoRotate={loaded && !introDone}
+            autoRotateSpeed={1.5}
           />
         </Canvas>
       </div>
