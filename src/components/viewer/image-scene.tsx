@@ -19,24 +19,14 @@ function computeDepthFromImage(img: HTMLImageElement): string {
   const ctx = canvas.getContext("2d")!
   ctx.drawImage(img, 0, 0, w, h)
   const src = ctx.getImageData(0, 0, w, h)
-
   const out = ctx.createImageData(w, h)
 
-  // Build depth using:
-  // 1. Vertical gradient (higher pixels = farther for landscapes)
-  // 2. Luminance (brighter = closer)
-  // 3. Local contrast / edge detection for object boundaries
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4
-
-      // Luminance component
       const lum = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255
-
-      // Vertical position: bottom of image tends to be closer
       const vertFactor = 1 - y / h
 
-      // Local contrast: sample neighbors for edge detection
       let contrast = 0
       if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
         const center = (src.data[i] + src.data[i + 1] + src.data[i + 2]) / 3
@@ -50,14 +40,8 @@ function computeDepthFromImage(img: HTMLImageElement): string {
         contrast /= 9 * 255
       }
 
-      // Combine factors: weighted mix
       let depth = vertFactor * 0.55 + lum * 0.25 + contrast * 0.2
-
-      // Boost edges for object separation
-      if (contrast > 0.08) {
-        depth += contrast * 0.3
-      }
-
+      if (contrast > 0.08) depth += contrast * 0.3
       depth = Math.max(0, Math.min(1, depth))
 
       const val = Math.floor(depth * 255)
@@ -72,9 +56,34 @@ function computeDepthFromImage(img: HTMLImageElement): string {
   return canvas.toDataURL("image/png")
 }
 
+function loadDepthData(depthDataUrl: string): Promise<Float32Array> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement("canvas")
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext("2d")!
+      ctx.drawImage(img, 0, 0)
+      const pixels = ctx.getImageData(0, 0, img.width, img.height).data
+      const depth = new Float32Array(img.width * img.height)
+      for (let i = 0; i < depth.length; i++) {
+        depth[i] = pixels[i * 4] / 255
+      }
+      resolve(depth)
+    }
+    img.src = depthDataUrl
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /*  Depth-displaced mesh                                                */
 /* ------------------------------------------------------------------ */
+
+const SEGMENTS = 100
+const PLANE_W = 4
+const PLANE_H = 3
+const DEPTH_SCALE = 2.0
 
 function DepthMesh({
   imageUrl,
@@ -86,79 +95,76 @@ function DepthMesh({
   onLoad: () => void
 }) {
   const meshRef = useRef<THREE.Mesh>(null!)
-  const textureRef = useRef<THREE.VideoTexture | null>(null)
-  const segments = 100
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const materialRef = useRef<THREE.MeshStandardMaterial | null>(null)
 
-  // Create geometry once
-  const geo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(4, 3, segments, Math.floor(segments * 0.75))
-    g.setAttribute(
-      "originalPosition",
-      new THREE.BufferAttribute(new Float32Array(g.attributes.position.array), 3)
-    )
-    return g
-  }, [])
-
-  // Load image + compute depth + apply displacement
+  // Create displaced geometry once per imageUrl
   useEffect(() => {
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-    img.src = imageUrl
+    let cancelled = false
 
-    img.onload = () => {
-      // Client-side depth estimation
+    async function build() {
+      // Load image
+      const img = await new Promise<HTMLImageElement>((resolve) => {
+        const i = new Image()
+        i.crossOrigin = "anonymous"
+        i.onload = () => resolve(i)
+        i.src = imageUrl
+      })
+
+      if (cancelled) return
+
+      // Compute depth map
       const depthDataUrl = computeDepthFromImage(img)
+      const depthData = await loadDepthData(depthDataUrl)
 
-      // Load depth map to apply displacement
-      const depthImg = new Image()
-      depthImg.src = depthDataUrl
-      depthImg.onload = () => {
-        const canvas = document.createElement("canvas")
-        canvas.width = depthImg.width
-        canvas.height = depthImg.height
-        const ctx = canvas.getContext("2d")!
-        ctx.drawImage(depthImg, 0, 0)
-        const pixels = ctx.getImageData(0, 0, depthImg.width, depthImg.height).data
+      if (cancelled) return
 
-        const pos = geo.attributes.position.array as Float32Array
-        const orig = geo.attributes.originalPosition?.array as Float32Array
-        if (!orig) return
+      // Build geometry with depth displacement
+      const geo = new THREE.PlaneGeometry(PLANE_W, PLANE_H, SEGMENTS, Math.floor(SEGMENTS * 0.75))
+      const pos = geo.attributes.position.array as Float32Array
+      const uv = geo.attributes.uv.array as Float32Array
 
-        const uv = geo.attributes.uv.array as Float32Array
-
-        for (let i = 0; i < pos.length; i += 3) {
-          const u = uv[(i / 3) * 2]
-          const v = 1 - uv[(i / 3) * 2 + 1]
-
-          const px = Math.floor(u * (depthImg.width - 1))
-          const py = Math.floor(v * (depthImg.height - 1))
-          const pixelIdx = (py * depthImg.width + px) * 4
-
-          const depth = pixels[pixelIdx] / 255 // grayscale, 0-1
-          pos[i + 2] = orig[i + 2] + depth * 2.0
-        }
-
-        geo.attributes.position.needsUpdate = true
-        geo.computeVertexNormals()
+      for (let i = 0; i < pos.length; i += 3) {
+        const u = uv[(i / 3) * 2]
+        const v = 1 - uv[(i / 3) * 2 + 1]
+        const px = Math.floor(u * (depthData.length > 0 ? Math.sqrt(depthData.length) - 1 : 0)) % 256
+        const py = Math.floor(v * (Math.sqrt(depthData.length) - 1)) % 256
+        const w = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
+        const idx = py * w + px
+        const depth = depthData[Math.min(idx, depthData.length - 1)] ?? 0
+        pos[i + 2] = depth * DEPTH_SCALE
       }
 
+      geo.computeVertexNormals()
+
       // Load color texture
-      const loader = new THREE.TextureLoader()
-      loader.load(imageUrl, (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace
-        meshRef.current.material = new THREE.MeshStandardMaterial({
-          map: tex,
-          side: THREE.DoubleSide,
-          roughness: 0.5,
+      const tex = await new Promise<THREE.Texture>((resolve) => {
+        new THREE.TextureLoader().load(imageUrl, (t) => {
+          t.colorSpace = THREE.SRGBColorSpace
+          resolve(t)
         })
-        meshRef.current.geometry = geo
       })
+
+      if (cancelled) return
+
+      const mat = new THREE.MeshStandardMaterial({
+        map: tex,
+        side: THREE.DoubleSide,
+        roughness: 0.5,
+      })
+      materialRef.current = mat
+      meshRef.current.geometry = geo
+      meshRef.current.material = mat
+      onLoad()
     }
-  }, [imageUrl, geo])
+
+    build()
+    return () => { cancelled = true }
+  }, [imageUrl])
 
   // Swap to video texture when available
   useEffect(() => {
-    if (!videoUrl) return
+    if (!videoUrl || !meshRef.current) return
 
     const video = document.createElement("video")
     video.src = videoUrl
@@ -167,33 +173,29 @@ function DepthMesh({
     video.muted = true
     video.playsInline = true
     video.play().catch(() => {})
+    videoRef.current = video
 
     const tex = new THREE.VideoTexture(video)
     tex.colorSpace = THREE.SRGBColorSpace
-    textureRef.current = tex
 
-    const updateMaterial = () => {
-      if (meshRef.current) {
-        meshRef.current.material = new THREE.MeshStandardMaterial({
-          map: tex,
-          side: THREE.DoubleSide,
-          roughness: 0.5,
-        })
-        onLoad()
+    const swapTexture = () => {
+      if (materialRef.current) {
+        materialRef.current.map = tex
+        materialRef.current.needsUpdate = true
       }
     }
 
     if (video.readyState >= 2) {
-      updateMaterial()
+      swapTexture()
     } else {
-      video.addEventListener("loadeddata", updateMaterial, { once: true })
+      video.addEventListener("loadeddata", swapTexture, { once: true })
     }
 
     return () => {
       video.pause()
-      video.removeEventListener("loadeddata", updateMaterial)
+      video.removeEventListener("loadeddata", swapTexture)
     }
-  }, [videoUrl, onLoad])
+  }, [videoUrl])
 
   return (
     <mesh ref={meshRef}>
@@ -365,14 +367,14 @@ export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }:
                 {showVideo ? "spatial memory ready" : "capture loaded"}
               </span>
               <span className="text-[10px] tracking-[0.2em] uppercase text-violet-500/60">
-                spatial depth
+                depth-aware
               </span>
             </>
           ) : null}
         </div>
 
         <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-800">
-          orbit · zoom · pan
+          drag to orbit · scroll to zoom
         </p>
       </div>
     </div>
