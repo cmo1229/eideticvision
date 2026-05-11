@@ -136,6 +136,7 @@ export function HeroSection() {
 
   // Memory aesthetic mood
   const [mood, setMood] = useState<MoodId>("lucid")
+  const [sourceType, setSourceType] = useState<"image" | "text">("image")
 
   // Memory stack for chained prompt expansion
   const [memoryStack, setMemoryStack] = useState<string[]>([])
@@ -147,6 +148,7 @@ export function HeroSection() {
     if (asset.type === "image") {
       setAssetUrl(asset.url)
       setAssetType("image")
+      setSourceType("image")
       setGenerating(true)
       setGenError(null)
 
@@ -170,6 +172,7 @@ export function HeroSection() {
 
   const handlePrompt = async (promptText: string) => {
     setAssetType("image")
+    setSourceType("text")
     setGenerating(true)
     setGenError(null)
     setMemoryStack([])
@@ -235,6 +238,7 @@ export function HeroSection() {
           activeMemoryIndex={activeMemoryIndex}
           onMemorySelect={setActiveMemoryIndex}
           mood={mood}
+          sourceType={sourceType}
         />
       </section>
     )

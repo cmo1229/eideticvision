@@ -80,125 +80,211 @@ function loadDepthData(depthDataUrl: string): Promise<Float32Array> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Depth-displaced mesh                                                */
+/*  Curved depth surface — wraps around the viewer                      */
 /* ------------------------------------------------------------------ */
 
-const SEGMENTS = 100
-const PLANE_W = 4
-const PLANE_H = 3
-const DEPTH_SCALE = 2.0
+const SEGMENTS_X = 140
+const SEGMENTS_Y = 100
+const SURFACE_W = 10
+const SURFACE_H = 6
+const RADIUS = 7
+const ANGLE_SPAN = 1.5 // radians (~86 degrees of wrap)
+const DEPTH_SCALE = 3.5
+
+function buildCurvedGeometry(depthData: Float32Array): THREE.BufferGeometry {
+  const dw = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
+  const dh = dw
+
+  const vertices: number[] = []
+  const uvs: number[] = []
+  const indices: number[] = []
+
+  for (let iy = 0; iy <= SEGMENTS_Y; iy++) {
+    const v = iy / SEGMENTS_Y
+    const y = (0.5 - v) * SURFACE_H
+
+    for (let ix = 0; ix <= SEGMENTS_X; ix++) {
+      const u = ix / SEGMENTS_X
+
+      // Map flat u to cylindrical angle
+      const angle = (u - 0.5) * ANGLE_SPAN
+
+      // Surface position on cylinder
+      const sx = RADIUS * Math.sin(angle)
+      const sz = RADIUS * (1 - Math.cos(angle))
+
+      // Depth sample
+      const px = Math.floor(u * (dw - 1))
+      const py = Math.floor((1 - v) * (dh - 1))
+      const idx = Math.min(py * dw + px, depthData.length - 1)
+      const depth = depthData[idx] ?? 0
+
+      // Radial normal
+      const nx = Math.sin(angle)
+      const nz = Math.cos(angle)
+
+      // Push vertex outward from cylinder by depth amount
+      vertices.push(
+        sx + nx * depth * DEPTH_SCALE,
+        y,
+        sz + nz * depth * DEPTH_SCALE
+      )
+      uvs.push(u, v)
+    }
+  }
+
+  for (let iy = 0; iy < SEGMENTS_Y; iy++) {
+    for (let ix = 0; ix < SEGMENTS_X; ix++) {
+      const a = iy * (SEGMENTS_X + 1) + ix
+      const b = a + SEGMENTS_X + 1
+      indices.push(a, b, a + 1, b, b + 1, a + 1)
+    }
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2))
+  geo.setIndex(indices)
+  geo.computeVertexNormals()
+  return geo
+}
 
 function DepthMesh({
   imageUrl,
   videoUrl,
   onLoad,
+  sourceType,
 }: {
   imageUrl: string
   videoUrl?: string | null
   onLoad: () => void
+  sourceType: "image" | "text"
 }) {
   const meshRef = useRef<THREE.Mesh>(null!)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const materialRef = useRef<THREE.MeshStandardMaterial | null>(null)
 
-  // Create displaced geometry once per imageUrl
+  // Build curved geometry with depth (image) or without (text prompt)
   useEffect(() => {
     let cancelled = false
 
     async function build() {
-      // Load image
-      const img = await new Promise<HTMLImageElement>((resolve) => {
-        const i = new Image()
-        i.crossOrigin = "anonymous"
-        i.onload = () => resolve(i)
-        i.src = imageUrl
-      })
+      let geo: THREE.BufferGeometry
+      let textureUrl: string
 
-      if (cancelled) return
+      if (sourceType === "text") {
+        // Text prompt: no source image, use flat depth (all zeros) for gentle curve
+        const flatDepth = new Float32Array(256 * 256) // all zeros
+        geo = buildCurvedGeometry(flatDepth)
 
-      // Compute depth map
-      const depthDataUrl = computeDepthFromImage(img)
-      const depthData = await loadDepthData(depthDataUrl)
+        // Video is the texture (or will be swapped in)
+        textureUrl = videoUrl ?? imageUrl
+      } else {
+        // Image upload: full depth computation
+        const img = await new Promise<HTMLImageElement>((resolve) => {
+          const i = new Image()
+          i.crossOrigin = "anonymous"
+          i.onload = () => resolve(i)
+          i.src = imageUrl
+        })
 
-      if (cancelled) return
+        if (cancelled) return
 
-      // Build geometry with depth displacement
-      const geo = new THREE.PlaneGeometry(PLANE_W, PLANE_H, SEGMENTS, Math.floor(SEGMENTS * 0.75))
-      const pos = geo.attributes.position.array as Float32Array
-      const uv = geo.attributes.uv.array as Float32Array
+        const depthDataUrl = computeDepthFromImage(img)
+        const depthData = await loadDepthData(depthDataUrl)
 
-      for (let i = 0; i < pos.length; i += 3) {
-        const u = uv[(i / 3) * 2]
-        const v = 1 - uv[(i / 3) * 2 + 1]
-        const px = Math.floor(u * (depthData.length > 0 ? Math.sqrt(depthData.length) - 1 : 0)) % 256
-        const py = Math.floor(v * (Math.sqrt(depthData.length) - 1)) % 256
-        const w = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
-        const idx = py * w + px
-        const depth = depthData[Math.min(idx, depthData.length - 1)] ?? 0
-        pos[i + 2] = depth * DEPTH_SCALE
+        if (cancelled) return
+
+        geo = buildCurvedGeometry(depthData)
+        textureUrl = imageUrl
       }
 
-      geo.computeVertexNormals()
-
-      // Load color texture
-      const tex = await new Promise<THREE.Texture>((resolve) => {
-        new THREE.TextureLoader().load(imageUrl, (t) => {
-          t.colorSpace = THREE.SRGBColorSpace
-          resolve(t)
-        })
-      })
-
       if (cancelled) return
 
-      const mat = new THREE.MeshStandardMaterial({
-        map: tex,
-        side: THREE.DoubleSide,
-        roughness: 0.5,
-      })
-      materialRef.current = mat
-      meshRef.current.geometry = geo
-      meshRef.current.material = mat
-      onLoad()
+      // Load texture (image or first video frame)
+      if (sourceType === "text" && videoUrl) {
+        // Text: load video directly
+        const video = document.createElement("video")
+        video.src = videoUrl
+        video.crossOrigin = "anonymous"
+        video.loop = true
+        video.muted = true
+        video.playsInline = true
+        video.play().catch(() => {})
+        videoRef.current = video
+
+        const tex = new THREE.VideoTexture(video)
+        tex.colorSpace = THREE.SRGBColorSpace
+
+        const mat = new THREE.MeshStandardMaterial({
+          map: tex,
+          side: THREE.DoubleSide,
+          roughness: 0.5,
+        })
+        materialRef.current = mat
+        meshRef.current.geometry = geo
+        meshRef.current.material = mat
+
+        if (video.readyState >= 2) {
+          onLoad()
+        } else {
+          video.addEventListener("loadeddata", () => onLoad(), { once: true })
+        }
+      } else {
+        // Image: load image texture
+        const tex = await new Promise<THREE.Texture>((resolve) => {
+          new THREE.TextureLoader().load(textureUrl, (t) => {
+            t.colorSpace = THREE.SRGBColorSpace
+            resolve(t)
+          })
+        })
+
+        if (cancelled) return
+
+        const mat = new THREE.MeshStandardMaterial({
+          map: tex,
+          side: THREE.DoubleSide,
+          roughness: 0.5,
+        })
+        materialRef.current = mat
+        meshRef.current.geometry = geo
+        meshRef.current.material = mat
+
+        // Swap to video texture when available
+        if (videoUrl) {
+          const video = document.createElement("video")
+          video.src = videoUrl
+          video.crossOrigin = "anonymous"
+          video.loop = true
+          video.muted = true
+          video.playsInline = true
+          video.play().catch(() => {})
+          videoRef.current = video
+
+          const vTex = new THREE.VideoTexture(video)
+          vTex.colorSpace = THREE.SRGBColorSpace
+
+          const swapTexture = () => {
+            if (materialRef.current) {
+              materialRef.current.map = vTex
+              materialRef.current.needsUpdate = true
+            }
+          }
+
+          if (video.readyState >= 2) {
+            swapTexture()
+          } else {
+            video.addEventListener("loadeddata", swapTexture, { once: true })
+          }
+        }
+
+        onLoad()
+      }
     }
 
     build()
     return () => { cancelled = true }
-  }, [imageUrl])
-
-  // Swap to video texture when available
-  useEffect(() => {
-    if (!videoUrl || !meshRef.current) return
-
-    const video = document.createElement("video")
-    video.src = videoUrl
-    video.crossOrigin = "anonymous"
-    video.loop = true
-    video.muted = true
-    video.playsInline = true
-    video.play().catch(() => {})
-    videoRef.current = video
-
-    const tex = new THREE.VideoTexture(video)
-    tex.colorSpace = THREE.SRGBColorSpace
-
-    const swapTexture = () => {
-      if (materialRef.current) {
-        materialRef.current.map = tex
-        materialRef.current.needsUpdate = true
-      }
-    }
-
-    if (video.readyState >= 2) {
-      swapTexture()
-    } else {
-      video.addEventListener("loadeddata", swapTexture, { once: true })
-    }
-
-    return () => {
-      video.pause()
-      video.removeEventListener("loadeddata", swapTexture)
-    }
-  }, [videoUrl])
+  }, [imageUrl, videoUrl, sourceType])
 
   return (
     <mesh ref={meshRef}>
@@ -317,6 +403,7 @@ interface ImageSceneProps {
   activeMemoryIndex?: number
   onMemorySelect?: (index: number) => void
   mood?: MoodId
+  sourceType?: "image" | "text"
 }
 
 export function ImageScene({
@@ -330,17 +417,16 @@ export function ImageScene({
   activeMemoryIndex = 0,
   onMemorySelect,
   mood = "lucid",
+  sourceType = "image",
 }: ImageSceneProps) {
   const [loaded, setLoaded] = useState(false)
   const [introDone, setIntroDone] = useState(false)
   const showVideo = videoUrls && videoUrls.length > 0
 
-  // Determine which video to show
   const activeVideo = memoryStack && memoryStack.length > 0
     ? memoryStack[activeMemoryIndex]
     : showVideo ? videoUrls![0] : undefined
 
-  // End intro after 4.5 seconds
   useEffect(() => {
     if (!loaded) return
     const t = setTimeout(() => setIntroDone(true), 4500)
@@ -391,7 +477,7 @@ export function ImageScene({
         )}
 
         <Canvas
-          camera={{ position: [0, 0, 4], fov: 45 }}
+          camera={{ position: [0, 0, 3.5], fov: 55 }}
           style={{ background: "#030305" }}
         >
           <ambientLight intensity={0.5} />
@@ -401,6 +487,7 @@ export function ImageScene({
           <DepthMesh
             imageUrl={imageUrl}
             videoUrl={activeVideo}
+            sourceType={sourceType}
             onLoad={() => setLoaded(true)}
           />
 
@@ -410,9 +497,9 @@ export function ImageScene({
             makeDefault
             enablePan
             enableZoom
-            minDistance={1.5}
+            minDistance={2}
             maxDistance={12}
-            target={[0, 0, 0.5]}
+            target={[0, 0, 1.5]}
             autoRotate={loaded && !introDone}
             autoRotateSpeed={1.5}
           />
