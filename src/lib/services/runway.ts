@@ -117,3 +117,21 @@ export async function generateImageToVideo(
 
   return task.output
 }
+
+export async function generateTextToVideo(
+  prompt: string,
+  duration = 5
+): Promise<string[]> {
+  const taskId = await createTextToVideo(prompt, duration)
+  const task = await pollTask(taskId)
+
+  if (task.status === "FAILED") {
+    throw new Error(task.error ?? "RunwayML generation failed")
+  }
+
+  if (!task.output || task.output.length === 0) {
+    throw new Error("RunwayML returned no output")
+  }
+
+  return task.output
+}

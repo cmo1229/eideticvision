@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import axios from "axios"
 import { FileUploader, type UploadedAsset } from "@/components/ui/file-uploader"
+import { PromptInput } from "@/components/ui/prompt-input"
 import { Scene } from "@/components/viewer/scene"
 import { ImageScene } from "@/components/viewer/image-scene"
 
@@ -132,6 +133,10 @@ export function HeroSection() {
   const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
+  // Memory stack for chained prompt expansion
+  const [memoryStack, setMemoryStack] = useState<string[]>([])
+  const [activeMemoryIndex, setActiveMemoryIndex] = useState(0)
+
   useEffect(() => { setMounted(true) }, [])
 
   const handleComplete = async (asset: UploadedAsset) => {
@@ -144,6 +149,10 @@ export function HeroSection() {
       try {
         const { data } = await axios.post("/api/generate", { imageUrl: asset.url })
         setVideoUrls(data.videoUrls)
+        if (data.videoUrls?.[0]) {
+          setMemoryStack([data.videoUrls[0]])
+          setActiveMemoryIndex(0)
+        }
       } catch (err: any) {
         setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
       } finally {
@@ -155,9 +164,51 @@ export function HeroSection() {
     setAssetUrl(asset.url)
   }
 
+  const handlePrompt = async (promptText: string) => {
+    setAssetType("image")
+    setGenerating(true)
+    setGenError(null)
+    setMemoryStack([])
+
+    try {
+      const { data } = await axios.post("/api/generate", { promptText, duration: 5 })
+      setVideoUrls(data.videoUrls)
+      if (data.videoUrls?.[0]) {
+        setAssetUrl(data.videoUrls[0])
+        setMemoryStack([data.videoUrls[0]])
+        setActiveMemoryIndex(0)
+      }
+    } catch (err: any) {
+      setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const handlePromptExpand = async (promptText: string) => {
+    setGenerating(true)
+    setGenError(null)
+
+    try {
+      const { data } = await axios.post("/api/generate", { promptText, duration: 5 })
+      if (data.videoUrls?.[0]) {
+        const newStack = [...memoryStack, data.videoUrls[0]]
+        setMemoryStack(newStack)
+        setActiveMemoryIndex(newStack.length - 1)
+        setVideoUrls(data.videoUrls)
+      }
+    } catch (err: any) {
+      setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   const handleReturn = () => {
     setAssetUrl(undefined)
     setVideoUrls(undefined)
+    setMemoryStack([])
+    setActiveMemoryIndex(0)
     setGenError(null)
   }
 
@@ -175,6 +226,10 @@ export function HeroSection() {
           videoUrls={videoUrls}
           generating={generating}
           error={genError}
+          onPromptExpand={handlePromptExpand}
+          memoryStack={memoryStack}
+          activeMemoryIndex={activeMemoryIndex}
+          onMemorySelect={setActiveMemoryIndex}
         />
       </section>
     )
@@ -249,6 +304,22 @@ export function HeroSection() {
         {/* Upload zone */}
         <div className="mt-12 w-full max-w-lg">
           <FileUploader onUploadComplete={handleComplete} />
+        </div>
+
+        {/* Divider */}
+        <div className="mt-8 flex items-center gap-3 max-w-lg w-full">
+          <span className="block h-[1px] flex-1 bg-neutral-800/40" />
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-700">or</span>
+          <span className="block h-[1px] flex-1 bg-neutral-800/40" />
+        </div>
+
+        {/* Prompt input */}
+        <div className="mt-8 w-full max-w-lg">
+          <PromptInput
+            onSubmit={handlePrompt}
+            generating={generating}
+            placeholder="describe a memory..."
+          />
         </div>
 
         {/* Prompt chips */}

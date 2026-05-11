@@ -279,6 +279,8 @@ function GenerationOverlay() {
   )
 }
 
+import { PromptInput } from "@/components/ui/prompt-input"
+
 /* ------------------------------------------------------------------ */
 /*  ImageScene                                                          */
 /* ------------------------------------------------------------------ */
@@ -289,12 +291,31 @@ interface ImageSceneProps {
   depthUrl?: string | null
   generating: boolean
   error: string | null
+  onPromptExpand?: (prompt: string) => void
+  memoryStack?: string[]
+  activeMemoryIndex?: number
+  onMemorySelect?: (index: number) => void
 }
 
-export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }: ImageSceneProps) {
+export function ImageScene({
+  imageUrl,
+  videoUrls,
+  depthUrl,
+  generating,
+  error,
+  onPromptExpand,
+  memoryStack,
+  activeMemoryIndex = 0,
+  onMemorySelect,
+}: ImageSceneProps) {
   const [loaded, setLoaded] = useState(false)
   const [introDone, setIntroDone] = useState(false)
   const showVideo = videoUrls && videoUrls.length > 0
+
+  // Determine which video to show
+  const activeVideo = memoryStack && memoryStack.length > 0
+    ? memoryStack[activeMemoryIndex]
+    : showVideo ? videoUrls![0] : undefined
 
   // End intro after 4.5 seconds
   useEffect(() => {
@@ -305,6 +326,27 @@ export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }:
 
   return (
     <div className="relative w-full">
+      {/* Memory stack navigation */}
+      {memoryStack && memoryStack.length > 1 && (
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+          {memoryStack.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => onMemorySelect?.(i)}
+              className={`shrink-0 w-2 h-2 rounded-full transition-all
+                ${i === activeMemoryIndex
+                  ? "bg-violet-400 shadow-[0_0_6px_rgba(167,139,250,0.6)]"
+                  : "bg-neutral-800 hover:bg-neutral-700"
+                }`}
+              title={`Memory ${i + 1}`}
+            />
+          ))}
+          <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 ml-2">
+            memory {activeMemoryIndex + 1}/{memoryStack.length}
+          </span>
+        </div>
+      )}
+
       {/* Canvas */}
       <div className="relative w-full h-[75vh] overflow-hidden border border-neutral-800/30 bg-[#030305]">
         {!loaded && !generating && (
@@ -335,7 +377,7 @@ export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }:
 
           <DepthMesh
             imageUrl={imageUrl}
-            videoUrl={showVideo ? videoUrls[0] : undefined}
+            videoUrl={activeVideo}
             onLoad={() => setLoaded(true)}
           />
 
@@ -364,7 +406,7 @@ export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }:
           ) : loaded ? (
             <>
               <span className="text-[11px] tracking-[0.25em] uppercase text-neutral-500">
-                {showVideo ? "spatial memory ready" : "capture loaded"}
+                {activeVideo ? "spatial memory ready" : "capture loaded"}
               </span>
               <span className="text-[10px] tracking-[0.2em] uppercase text-violet-500/60">
                 depth-aware
@@ -377,6 +419,18 @@ export function ImageScene({ imageUrl, videoUrls, depthUrl, generating, error }:
           drag to orbit · scroll to zoom
         </p>
       </div>
+
+      {/* Expand prompt bar */}
+      {onPromptExpand && !generating && loaded && (
+        <div className="mt-4">
+          <PromptInput
+            onSubmit={onPromptExpand}
+            generating={false}
+            placeholder="expand this memory..."
+            compact
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { generateImageToVideo } from "@/lib/services/runway"
+import { generateImageToVideo, generateTextToVideo } from "@/lib/services/runway"
 
 export const maxDuration = 300
 
@@ -14,22 +14,32 @@ const STYLE_PROMPTS: Record<string, string> = {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { imageUrl, prompt, style, duration } = body
+    const { imageUrl, promptText, prompt, style, duration } = body
 
-    if (!imageUrl) {
-      return NextResponse.json({ error: "imageUrl required" }, { status: 400 })
+    // Text-to-video: generate a world from a text description
+    if (promptText) {
+      const output = await generateTextToVideo(promptText, duration ?? 5)
+      return NextResponse.json({ videoUrls: output, type: "text" })
     }
 
-    const resolvedPrompt =
-      prompt ?? STYLE_PROMPTS[style as string] ?? STYLE_PROMPTS.ethereal
+    // Image-to-video: generate from an uploaded image
+    if (imageUrl) {
+      const resolvedPrompt =
+        prompt ?? STYLE_PROMPTS[style as string] ?? STYLE_PROMPTS.ethereal
 
-    const output = await generateImageToVideo(
-      imageUrl,
-      resolvedPrompt,
-      duration ?? 5
+      const output = await generateImageToVideo(
+        imageUrl,
+        resolvedPrompt,
+        duration ?? 5
+      )
+
+      return NextResponse.json({ videoUrls: output, type: "image" })
+    }
+
+    return NextResponse.json(
+      { error: "imageUrl or promptText required" },
+      { status: 400 }
     )
-
-    return NextResponse.json({ videoUrls: output })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Generation failed"
     console.error("RunwayML generation error:", message)
