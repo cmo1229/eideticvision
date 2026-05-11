@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import axios from "axios"
-import { FileUploader, type AssetType } from "@/components/ui/file-uploader"
+import { FileUploader, type UploadedAsset } from "@/components/ui/file-uploader"
 import { Scene } from "@/components/viewer/scene"
 import { ImageScene } from "@/components/viewer/image-scene"
 
@@ -98,7 +98,7 @@ function NoiseOverlay() {
 
 export function HeroSection() {
   const [assetUrl, setAssetUrl] = useState<string | undefined>()
-  const [assetType, setAssetType] = useState<AssetType>("glb")
+  const [assetType, setAssetType] = useState<string>("glb")
   const [videoUrls, setVideoUrls] = useState<string[] | undefined>()
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
@@ -106,14 +106,14 @@ export function HeroSection() {
 
   useEffect(() => { setMounted(true) }, [])
 
-  const handleComplete = async (url: string, type: AssetType) => {
-    if (type === "image") {
-      setAssetUrl(url)
+  const handleComplete = async (asset: UploadedAsset) => {
+    if (asset.type === "image") {
+      setAssetUrl(asset.url)
       setAssetType("image")
       setGenerating(true)
       setGenError(null)
       try {
-        const { data } = await axios.post("/api/generate", { imageUrl: url })
+        const { data } = await axios.post("/api/generate", { imageUrl: asset.url })
         setVideoUrls(data.videoUrls)
       } catch (err: any) {
         setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
@@ -122,8 +122,9 @@ export function HeroSection() {
       }
       return
     }
-    setAssetType(type)
-    setAssetUrl(url)
+    // 3D files: blob URL goes straight to viewer
+    setAssetType(asset.type)
+    setAssetUrl(asset.url)
   }
 
   const handleReturn = () => {
