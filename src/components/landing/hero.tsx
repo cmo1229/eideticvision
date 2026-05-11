@@ -93,6 +93,34 @@ function NoiseOverlay() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Visual step                                                         */
+/* ------------------------------------------------------------------ */
+
+function VisualSteps() {
+  const steps = [
+    { icon: "◉", label: "drop a photo" },
+    { icon: "◎", label: "ai reconstructs depth" },
+    { icon: "◌", label: "navigate the memory" },
+  ]
+
+  return (
+    <div className="flex items-center gap-8 mt-16">
+      {steps.map((s, i) => (
+        <div key={s.label} className="flex items-center gap-8">
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-neutral-500 text-lg">{s.icon}</span>
+            <span className="text-[10px] tracking-[0.25em] uppercase text-neutral-600">{s.label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <span className="text-neutral-800 text-xs">→</span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /*  Hero                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -114,8 +142,6 @@ export function HeroSection() {
       setGenError(null)
 
       try {
-        // RunwayML generates the living video
-        // Depth is computed instantly client-side from the image
         const { data } = await axios.post("/api/generate", { imageUrl: asset.url })
         setVideoUrls(data.videoUrls)
       } catch (err: any) {
@@ -125,7 +151,6 @@ export function HeroSection() {
       }
       return
     }
-    // 3D files: blob URL goes straight to viewer
     setAssetType(asset.type)
     setAssetUrl(asset.url)
   }
@@ -171,7 +196,7 @@ export function HeroSection() {
 
   return (
     <section className="relative min-h-[calc(100vh-3.5rem)] flex flex-col items-center justify-center overflow-hidden">
-      {/* Background video — dual-source seamless loop */}
+      {/* Background video */}
       <div className="absolute inset-0 z-0">
         <video
           autoPlay
@@ -210,12 +235,15 @@ export function HeroSection() {
           </span>
         </h1>
 
-        {/* Sub */}
-        <p className="mt-6 text-neutral-600 text-sm tracking-[0.35em] uppercase font-light text-center">
-          spatial memories · rendered
+        {/* Subtitle */}
+        <p className="mt-6 text-neutral-500 text-sm tracking-[0.35em] uppercase font-light text-center max-w-md">
+          any photo becomes a navigable memory
         </p>
 
-        {/* Divider line */}
+        {/* How it works - visual steps */}
+        <VisualSteps />
+
+        {/* Divider */}
         <div className="mt-12 w-12 h-[1px] bg-gradient-to-r from-transparent via-neutral-700 to-transparent" />
 
         {/* Upload zone */}
@@ -223,18 +251,27 @@ export function HeroSection() {
           <FileUploader onUploadComplete={handleComplete} />
         </div>
 
-        {/* Tags */}
-        <div className="mt-16 flex items-center gap-6 text-[10px] tracking-[0.3em] uppercase text-neutral-700">
-          <span>3D Gaussians</span>
-          <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span>Neural Styles</span>
-          <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span>Live Capture</span>
+        {/* Prompt chips */}
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          {[
+            "a foggy morning in tokyo",
+            "grandma's kitchen",
+            "sunset over the canyon",
+            "a rainy street at night",
+            "your childhood home",
+          ].map((p) => (
+            <span
+              key={p}
+              className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 border border-neutral-800/40 px-3 py-1 hover:border-neutral-700 hover:text-neutral-500 transition-colors cursor-default"
+            >
+              {p}
+            </span>
+          ))}
         </div>
       </div>
 
-      {/* Bottom edge */}
-      <div className="absolute bottom-6 inset-x-0 flex items-center justify-center gap-2">
+      {/* Scroll indicator */}
+      <div className="absolute bottom-6 inset-x-0 z-10 flex items-center justify-center gap-2">
         <span className="block w-8 h-[1px] bg-neutral-800" />
         <span className="text-[10px] text-neutral-800 tracking-[0.4em] uppercase">scroll</span>
         <span className="block w-8 h-[1px] bg-neutral-800" />
@@ -242,6 +279,8 @@ export function HeroSection() {
     </section>
   )
 }
+
+export { type AssetType } from "@/components/ui/file-uploader"
 
 export default function Home() {
   return (
