@@ -287,6 +287,14 @@ function DepthMesh({
     return () => { cancelled = true }
   }, [imageUrl, videoUrl, sourceType])
 
+  // Breathing world — subtle pulse like the memory is alive
+  useFrame(() => {
+    if (!meshRef.current) return
+    const t = Date.now() * 0.0003
+    const breathe = 1 + Math.sin(t) * 0.008 + Math.sin(t * 1.7) * 0.005
+    meshRef.current.scale.setScalar(breathe)
+  })
+
   return (
     <mesh ref={meshRef}>
       <meshStandardMaterial side={THREE.DoubleSide} roughness={0.5} />
@@ -387,6 +395,73 @@ function FreeCamera({ active, intro }: { active: boolean; intro: boolean }) {
   })
 
   return null
+}
+
+/* ------------------------------------------------------------------ */
+/*  Memory atmosphere — fog, particles, breathing world                  */
+/* ------------------------------------------------------------------ */
+
+function MemoryFog({ mood }: { mood: MoodId }) {
+  const { scene } = useThree()
+  const m = getMood(mood)
+
+  useEffect(() => {
+    const fogColor = m.id === "noir" ? "#0a0a0a" : m.id === "warm" ? "#1a1410" : "#030310"
+    scene.fog = new THREE.FogExp2(fogColor, 0.0008)
+    scene.background = new THREE.Color(fogColor)
+    return () => {
+      scene.fog = null
+      scene.background = new THREE.Color("#030305")
+    }
+  }, [scene, m.id])
+
+  return null
+}
+
+function MemoryParticles() {
+  const pointsRef = useRef<THREE.Points>(null!)
+
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry()
+    const count = 200
+    const pos = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const radius = 2 + Math.random() * 12
+      pos[i * 3] = Math.cos(angle) * radius
+      pos[i * 3 + 1] = (Math.random() - 0.5) * CYL_HEIGHT
+      pos[i * 3 + 2] = Math.sin(angle) * radius
+    }
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3))
+    return g
+  }, [])
+
+  useFrame((_, delta) => {
+    const pos = pointsRef.current.geometry.attributes.position.array as Float32Array
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i + 1] += Math.sin(Date.now() * 0.0005 + i) * delta * 0.15
+      const angle = Math.atan2(pos[i + 2], pos[i])
+      const newAngle = angle + delta * 0.03
+      const radius = Math.sqrt(pos[i] ** 2 + pos[i + 2] ** 2)
+      pos[i] = Math.cos(newAngle) * radius
+      pos[i + 2] = Math.sin(newAngle) * radius
+    }
+    pointsRef.current.geometry.attributes.position.needsUpdate = true
+  })
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry />
+      <pointsMaterial
+        size={0.04}
+        color="#c4b5fd"
+        transparent
+        opacity={0.35}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+      />
+    </points>
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -517,6 +592,7 @@ export function ImageScene({
 }: ImageSceneProps) {
   const [loaded, setLoaded] = useState(false)
   const [introDone, setIntroDone] = useState(false)
+  const [recalling, setRecalling] = useState(true)
   const showVideo = videoUrls && videoUrls.length > 0
 
   const activeVideo = memoryStack && memoryStack.length > 0
@@ -525,7 +601,14 @@ export function ImageScene({
 
   useEffect(() => {
     if (!loaded) return
-    const t = setTimeout(() => setIntroDone(true), 4500)
+    const t = setTimeout(() => setIntroDone(true), 5000)
+    return () => clearTimeout(t)
+  }, [loaded])
+
+  // Recall fade-in: world emerges from fog over 3 seconds
+  useEffect(() => {
+    if (!loaded) return
+    const t = setTimeout(() => setRecalling(false), 3000)
     return () => clearTimeout(t)
   }, [loaded])
 
@@ -554,6 +637,17 @@ export function ImageScene({
 
       {/* Canvas */}
       <div className="relative w-full h-[75vh] overflow-hidden border border-neutral-800/30 bg-[#030305]">
+        {/* Recall fade-in — memory emerges from darkness */}
+        {loaded && recalling && (
+          <div
+            className="absolute inset-0 z-10 bg-[#030310] pointer-events-none"
+            style={{
+              opacity: recalling ? 1 : 0,
+              transition: "opacity 2.5s ease-out",
+            }}
+          />
+        )}
+
         {!loaded && !generating && (
           <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-10 backdrop-blur-md">
             <p className="text-sm tracking-[0.3em] uppercase text-violet-400/80 animate-pulse">loading capture</p>
@@ -589,6 +683,8 @@ export function ImageScene({
 
           <Environment preset="night" />
           <MoodEffects mood={mood} />
+          <MemoryFog mood={mood} />
+          <MemoryParticles />
           <FreeCamera active={loaded && !generating} intro={loaded && !introDone} />
         </Canvas>
       </div>
