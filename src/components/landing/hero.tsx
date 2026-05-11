@@ -100,7 +100,6 @@ export function HeroSection() {
   const [assetUrl, setAssetUrl] = useState<string | undefined>()
   const [assetType, setAssetType] = useState<string>("glb")
   const [videoUrls, setVideoUrls] = useState<string[] | undefined>()
-  const [depthUrl, setDepthUrl] = useState<string | null | undefined>()
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -113,27 +112,14 @@ export function HeroSection() {
       setAssetType("image")
       setGenerating(true)
       setGenError(null)
-      setDepthUrl(undefined)
-
-      // Fire depth estimation + RunwayML generation in parallel
-      const depthPromise = axios
-        .post("/api/depth", { imageUrl: asset.url })
-        .then(({ data }) => data.depthUrl as string | null)
-        .catch(() => null) // depth is optional, don't block on failure
-
-      const generatePromise = axios
-        .post("/api/generate", { imageUrl: asset.url })
-        .then(({ data }) => data.videoUrls as string[])
-        .catch((err) => {
-          throw new Error(err.response?.data?.error ?? err.message ?? "Generation failed")
-        })
 
       try {
-        const [depthResult, videoResult] = await Promise.all([depthPromise, generatePromise])
-        setDepthUrl(depthResult)
-        setVideoUrls(videoResult)
+        // RunwayML generates the living video
+        // Depth is computed instantly client-side from the image
+        const { data } = await axios.post("/api/generate", { imageUrl: asset.url })
+        setVideoUrls(data.videoUrls)
       } catch (err: any) {
-        setGenError(err.message ?? "Generation failed")
+        setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
       } finally {
         setGenerating(false)
       }
@@ -147,7 +133,6 @@ export function HeroSection() {
   const handleReturn = () => {
     setAssetUrl(undefined)
     setVideoUrls(undefined)
-    setDepthUrl(undefined)
     setGenError(null)
   }
 
@@ -163,7 +148,6 @@ export function HeroSection() {
         <ImageScene
           imageUrl={assetUrl}
           videoUrls={videoUrls}
-          depthUrl={depthUrl}
           generating={generating}
           error={genError}
         />
