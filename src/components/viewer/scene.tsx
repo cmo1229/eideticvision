@@ -7,6 +7,7 @@ import { EffectComposer, Bloom, ColorAverage, Vignette, HueSaturation } from "@r
 import { GLTFLoader, PLYLoader } from "three-stdlib"
 import * as THREE from "three"
 import { BlendFunction, Effect, EffectPass } from "postprocessing"
+import axios from "axios"
 
 /* ------------------------------------------------------------------ */
 /*  Style presets                                                      */
@@ -83,6 +84,14 @@ const PRESETS: StylePreset[] = [
     dirIntensity: 0.7,
   },
 ]
+
+const STYLE_PROMPTS: Record<string, string> = {
+  dream: "dreamlike, soft focus, ethereal glow, floating particles, cinematic slow motion",
+  noir: "film noir, high contrast, black and white, dramatic shadows, 1940s cinema aesthetic",
+  neon: "cyberpunk, neon lights, synthwave, electric colors, Blade Runner aesthetic",
+  natural: "natural lighting, golden hour, photorealistic, warm sunlight, serene atmosphere",
+  ethereal: "otherworldly, misty, celestial, soft pastels, heavenly atmosphere, floating dust motes",
+}
 
 /* ------------------------------------------------------------------ */
 /*  Loading overlay                                                    */
@@ -207,6 +216,12 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
 
+  /* neural memory */
+  const [neuralGenerating, setNeuralGenerating] = useState(false)
+  const [neuralVideo, setNeuralVideo] = useState<string | null>(null)
+  const [neuralError, setNeuralError] = useState<string | null>(null)
+  const [showNeural, setShowNeural] = useState(false)
+
   const preset = useMemo(() => PRESETS.find((p) => p.id === activeStyle.id) ?? PRESETS[0], [activeStyle.id])
 
   /* ---------- recording ---------- */
@@ -241,6 +256,33 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
     recorderRef.current = null
     setRecording(false)
   }, [])
+
+  /* ---------- neural memory generation ---------- */
+
+  const generateNeuralMemory = useCallback(async () => {
+    const canvas = canvasRef.current?.querySelector("canvas")
+    if (!canvas) return
+
+    setNeuralGenerating(true)
+    setNeuralError(null)
+
+    try {
+      const frameUrl = canvas.toDataURL("image/jpeg", 0.9)
+      const prompt = STYLE_PROMPTS[activeStyle.id] ?? STYLE_PROMPTS.ethereal
+      const { data } = await axios.post("/api/generate", {
+        imageUrl: frameUrl,
+        style: activeStyle.id,
+        prompt,
+        duration: 5,
+      })
+      setNeuralVideo(data.videoUrls[0] ?? null)
+      setShowNeural(true)
+    } catch (err: any) {
+      setNeuralError(err.response?.data?.error ?? err.message ?? "Generation failed")
+    } finally {
+      setNeuralGenerating(false)
+    }
+  }, [activeStyle.id])
 
   return (
     <div className="relative w-full">
@@ -283,7 +325,7 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
 
       {/* Action bar */}
       <div className="flex items-center justify-between mt-5">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
           {recording ? (
             <button
               onClick={stopRecording}
@@ -301,12 +343,78 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
               record
             </button>
           )}
+
+          <button
+            onClick={generateNeuralMemory}
+            disabled={neuralGenerating}
+            className={`inline-flex items-center gap-3 text-[11px] tracking-[0.25em] uppercase transition-colors
+              ${neuralGenerating
+                ? "text-violet-400/70 cursor-wait"
+                : "text-neutral-600 hover:text-violet-400"
+              }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${neuralGenerating ? "bg-violet-500 animate-pulse" : "bg-violet-600/50"}`} />
+            {neuralGenerating ? "generating" : "neural memory"}
+          </button>
         </div>
 
         <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-800">
           orbit · zoom · pan
         </p>
       </div>
+
+      {/* Neural memory overlay */}
+      {showNeural && neuralVideo && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="relative max-w-4xl w-full">
+            <video
+              src={neuralVideo}
+              controls
+              autoPlay
+              loop
+              playsInline
+              className="w-full border border-neutral-800/50"
+            />
+            <button
+              onClick={() => setShowNeural(false)}
+              className="absolute -top-10 right-0 text-xs text-neutral-500 hover:text-neutral-300 uppercase tracking-[0.3em] transition-colors"
+            >
+              close
+            </button>
+          </div>
+          <p className="mt-6 text-[10px] tracking-[0.3em] uppercase text-neutral-600">
+            {activeStyle.label} — neural memory
+          </p>
+          <div className="mt-8 flex items-center gap-4">
+            <button
+              onClick={() => setShowNeural(false)}
+              className="text-[11px] tracking-[0.25em] uppercase text-neutral-500 hover:text-neutral-300 transition-colors border border-neutral-800 px-6 py-2 hover:border-neutral-700"
+            >
+              back to viewer
+            </button>
+            <a
+              href={neuralVideo}
+              download={`eidetic-neural-${Date.now()}.mp4`}
+              className="text-[11px] tracking-[0.25em] uppercase text-violet-400/70 hover:text-violet-300 transition-colors border border-violet-500/30 px-6 py-2 hover:border-violet-500/60"
+            >
+              download
+            </a>
+          </div>
+        </div>
+      )}
+
+      {showNeural && neuralError && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center">
+          <p className="text-sm tracking-[0.2em] uppercase text-red-400/70">generation failed</p>
+          <p className="text-xs text-neutral-500 mt-4 max-w-md text-center">{neuralError}</p>
+          <button
+            onClick={() => { setShowNeural(false); setNeuralError(null) }}
+            className="mt-8 text-[11px] tracking-[0.25em] uppercase text-neutral-500 hover:text-neutral-300 transition-colors border border-neutral-800 px-6 py-2"
+          >
+            back to viewer
+          </button>
+        </div>
+      )}
     </div>
   )
 }

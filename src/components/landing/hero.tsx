@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { FileUploader } from "@/components/ui/file-uploader"
+import axios from "axios"
+import { FileUploader, type AssetType } from "@/components/ui/file-uploader"
 import { Scene } from "@/components/viewer/scene"
+import { ImageScene } from "@/components/viewer/image-scene"
 
 
 /* ------------------------------------------------------------------ */
@@ -96,22 +98,64 @@ function NoiseOverlay() {
 
 export function HeroSection() {
   const [assetUrl, setAssetUrl] = useState<string | undefined>()
-  const [assetType, setAssetType] = useState<string>("glb")
+  const [assetType, setAssetType] = useState<AssetType>("glb")
+  const [videoUrls, setVideoUrls] = useState<string[] | undefined>()
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
 
-  const handleComplete = (url: string) => {
-    const ext = url.split(".").pop()?.toLowerCase() ?? ""
-    setAssetType(ext === "ply" ? "ply" : "glb")
+  const handleComplete = async (url: string, type: AssetType) => {
+    if (type === "image") {
+      setAssetUrl(url)
+      setAssetType("image")
+      setGenerating(true)
+      setGenError(null)
+      try {
+        const { data } = await axios.post("/api/generate", { imageUrl: url })
+        setVideoUrls(data.videoUrls)
+      } catch (err: any) {
+        setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
+      } finally {
+        setGenerating(false)
+      }
+      return
+    }
+    setAssetType(type)
     setAssetUrl(url)
   }
 
-  if (assetUrl) {
+  const handleReturn = () => {
+    setAssetUrl(undefined)
+    setVideoUrls(undefined)
+    setGenError(null)
+  }
+
+  if (assetUrl && assetType === "image") {
     return (
       <section className="px-4 py-6 max-w-7xl mx-auto">
         <button
-          onClick={() => setAssetUrl(undefined)}
+          onClick={handleReturn}
+          className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
+        >
+          ← return
+        </button>
+        <ImageScene
+          imageUrl={assetUrl}
+          videoUrls={videoUrls}
+          generating={generating}
+          error={genError}
+        />
+      </section>
+    )
+  }
+
+  if (assetUrl && assetType !== "image") {
+    return (
+      <section className="px-4 py-6 max-w-7xl mx-auto">
+        <button
+          onClick={handleReturn}
           className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
         >
           ← return

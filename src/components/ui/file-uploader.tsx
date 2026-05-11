@@ -4,8 +4,10 @@ import { useState, useCallback, useRef } from "react"
 import { getSupabase } from "@/lib/supabase"
 import axios from "axios"
 
+export type AssetType = "ply" | "glb" | "gltf" | "image"
+
 interface UploaderProps {
-  onUploadComplete: (assetUrl: string) => void
+  onUploadComplete: (assetUrl: string, assetType: AssetType) => void
 }
 
 export function FileUploader({ onUploadComplete }: UploaderProps) {
@@ -46,16 +48,18 @@ export function FileUploader({ onUploadComplete }: UploaderProps) {
 
   const handleFile = useCallback(
     async (file: File) => {
-      const validExts = [".mp4", ".ply", ".glb", ".gltf"]
+      const validExts = [".mp4", ".ply", ".glb", ".gltf", ".jpg", ".jpeg", ".png", ".webp"]
+      const imageExts = [".jpg", ".jpeg", ".png", ".webp"]
       const ext = `.${file.name.split(".").pop()?.toLowerCase()}`
       if (!validExts.includes(ext)) {
-        setError("Only .mp4, .ply, .glb, .gltf")
+        setError("Only .mp4, .ply, .glb, .gltf, .jpg, .png, .webp")
         return
       }
       try {
         const { publicUrl } = await uploadToSupabase(file)
+        const assetType: AssetType = imageExts.includes(ext) ? "image" : ext.slice(1) as AssetType
         const resultUrl = await triggerProcessing(publicUrl)
-        onUploadComplete(resultUrl)
+        onUploadComplete(resultUrl, assetType)
       } catch (err: any) {
         setError(err.message ?? "Upload failed.")
       } finally {
@@ -101,7 +105,7 @@ export function FileUploader({ onUploadComplete }: UploaderProps) {
         <input
           ref={inputRef}
           type="file"
-          accept=".mp4,.ply,.glb,.gltf"
+          accept=".mp4,.ply,.glb,.gltf,.jpg,.jpeg,.png,.webp"
           className="hidden"
           onChange={onInputChange}
           disabled={uploading}
