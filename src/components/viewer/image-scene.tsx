@@ -1,8 +1,8 @@
 "use client"
 
 import { useRef, useEffect, useState, useMemo } from "react"
-import { Canvas } from "@react-three/fiber"
-import { OrbitControls, Environment } from "@react-three/drei"
+import { Canvas, useFrame, useThree } from "@react-three/fiber"
+import { Environment } from "@react-three/drei"
 import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import * as THREE from "three"
 import { getMood, type MoodId } from "@/lib/moods"
@@ -80,18 +80,16 @@ function loadDepthData(depthDataUrl: string): Promise<Float32Array> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Curved depth surface — wraps around the viewer                      */
+/*  Full 360° navigable world — cylinder you can walk through            */
 /* ------------------------------------------------------------------ */
 
-const SEGMENTS_X = 140
-const SEGMENTS_Y = 100
-const SURFACE_W = 10
-const SURFACE_H = 6
-const RADIUS = 7
-const ANGLE_SPAN = 1.5 // radians (~86 degrees of wrap)
-const DEPTH_SCALE = 3.5
+const SEGS_AROUND = 220
+const SEGS_VERT = 110
+const CYL_RADIUS = 14
+const CYL_HEIGHT = 10
+const DEPTH_SCALE = 6.0
 
-function buildCurvedGeometry(depthData: Float32Array): THREE.BufferGeometry {
+function buildCylinderGeometry(depthData: Float32Array): THREE.BufferGeometry {
   const dw = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
   const dh = dw
 
@@ -99,44 +97,47 @@ function buildCurvedGeometry(depthData: Float32Array): THREE.BufferGeometry {
   const uvs: number[] = []
   const indices: number[] = []
 
-  for (let iy = 0; iy <= SEGMENTS_Y; iy++) {
-    const v = iy / SEGMENTS_Y
-    const y = (0.5 - v) * SURFACE_H
+  for (let iy = 0; iy <= SEGS_VERT; iy++) {
+    const v = iy / SEGS_VERT
+    const y = (0.5 - v) * CYL_HEIGHT
 
-    for (let ix = 0; ix <= SEGMENTS_X; ix++) {
-      const u = ix / SEGMENTS_X
+    for (let ia = 0; ia <= SEGS_AROUND; ia++) {
+      const u = ia / SEGS_AROUND
+      const angle = u * Math.PI * 2
 
-      // Map flat u to cylindrical angle
-      const angle = (u - 0.5) * ANGLE_SPAN
+      // Cylinder base position
+      const sx = CYL_RADIUS * Math.sin(angle)
+      const sz = CYL_RADIUS * Math.cos(angle)
 
-      // Surface position on cylinder
-      const sx = RADIUS * Math.sin(angle)
-      const sz = RADIUS * (1 - Math.cos(angle))
-
-      // Depth sample
+      // Depth: map texture UV to depth map
+      // Video covers front 220°, depth fades toward back
       const px = Math.floor(u * (dw - 1))
       const py = Math.floor((1 - v) * (dh - 1))
       const idx = Math.min(py * dw + px, depthData.length - 1)
-      const depth = depthData[idx] ?? 0
+      const rawDepth = depthData[idx] ?? 0
+
+      // Falloff: full depth at front (angle near 0), reduced at sides/back
+      const frontness = Math.max(0, Math.cos(angle) * 0.7 + 0.3)
+      const depth = rawDepth * frontness
 
       // Radial normal
       const nx = Math.sin(angle)
       const nz = Math.cos(angle)
 
-      // Push vertex outward from cylinder by depth amount
+      // Push vertex inward (toward viewer) by depth amount
       vertices.push(
-        sx + nx * depth * DEPTH_SCALE,
+        sx - nx * depth * DEPTH_SCALE,
         y,
-        sz + nz * depth * DEPTH_SCALE
+        sz - nz * depth * DEPTH_SCALE
       )
       uvs.push(u, v)
     }
   }
 
-  for (let iy = 0; iy < SEGMENTS_Y; iy++) {
-    for (let ix = 0; ix < SEGMENTS_X; ix++) {
-      const a = iy * (SEGMENTS_X + 1) + ix
-      const b = a + SEGMENTS_X + 1
+  for (let iy = 0; iy < SEGS_VERT; iy++) {
+    for (let ia = 0; ia < SEGS_AROUND; ia++) {
+      const a = iy * (SEGS_AROUND + 1) + ia
+      const b = a + SEGS_AROUND + 1
       indices.push(a, b, a + 1, b, b + 1, a + 1)
     }
   }
@@ -175,7 +176,7 @@ function DepthMesh({
       if (sourceType === "text") {
         // Text prompt: no source image, use flat depth (all zeros) for gentle curve
         const flatDepth = new Float32Array(256 * 256) // all zeros
-        geo = buildCurvedGeometry(flatDepth)
+        geo = buildCylinderGeometry(flatDepth)
 
         // Video is the texture (or will be swapped in)
         textureUrl = videoUrl ?? imageUrl
@@ -195,7 +196,7 @@ function DepthMesh({
 
         if (cancelled) return
 
-        geo = buildCurvedGeometry(depthData)
+        geo = buildCylinderGeometry(depthData)
         textureUrl = imageUrl
       }
 
@@ -291,6 +292,101 @@ function DepthMesh({
       <meshStandardMaterial side={THREE.DoubleSide} roughness={0.5} />
     </mesh>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/*  FreeCamera — walk through the memory                                */
+/* ------------------------------------------------------------------ */
+
+function FreeCamera({ active, intro }: { active: boolean; intro: boolean }) {
+  const { camera, gl } = useThree()
+  const keys = useRef<Set<string>>(new Set())
+  const dragging = useRef(false)
+  const lastMouse = useRef({ x: 0, y: 0 })
+  const pitch = useRef(0)
+  const yaw = useRef(0)
+  const introTime = useRef(0)
+
+  useEffect(() => {
+    const el = gl.domElement
+
+    const onKeyDown = (e: KeyboardEvent) => keys.current.add(e.key.toLowerCase())
+    const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase())
+    const onMouseDown = (e: MouseEvent) => {
+      dragging.current = true
+      lastMouse.current = { x: e.clientX, y: e.clientY }
+    }
+    const onMouseUp = () => { dragging.current = false }
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return
+      const dx = e.clientX - lastMouse.current.x
+      const dy = e.clientY - lastMouse.current.y
+      yaw.current -= dx * 0.003
+      pitch.current -= dy * 0.003
+      pitch.current = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, pitch.current))
+      lastMouse.current = { x: e.clientX, y: e.clientY }
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("keyup", onKeyUp)
+    el.addEventListener("mousedown", onMouseDown)
+    window.addEventListener("mouseup", onMouseUp)
+    window.addEventListener("mousemove", onMouseMove)
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("keyup", onKeyUp)
+      el.removeEventListener("mousedown", onMouseDown)
+      window.removeEventListener("mouseup", onMouseUp)
+      window.removeEventListener("mousemove", onMouseMove)
+    }
+  }, [gl])
+
+  useFrame((_, delta) => {
+    if (!active) return
+
+    // Intro: auto-sweep to reveal the 360 world
+    if (intro) {
+      introTime.current += delta
+      yaw.current = introTime.current * 0.6 // gentle spin
+      if (introTime.current > 5) yaw.current = 0 // reset after intro
+    }
+
+    const speed = 4 * delta
+    const forward = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
+    const right = new THREE.Vector3(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
+
+    if (keys.current.has("w")) {
+      camera.position.add(forward.clone().multiplyScalar(speed))
+    }
+    if (keys.current.has("s")) {
+      camera.position.add(forward.clone().multiplyScalar(-speed))
+    }
+    if (keys.current.has("a")) {
+      camera.position.add(right.clone().multiplyScalar(-speed))
+    }
+    if (keys.current.has("d")) {
+      camera.position.add(right.clone().multiplyScalar(speed))
+    }
+
+    // Keep camera within cylinder
+    const dist = Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2)
+    if (dist > CYL_RADIUS - 1) {
+      const scale = (CYL_RADIUS - 1) / dist
+      camera.position.x *= scale
+      camera.position.z *= scale
+    }
+
+    // Apply look direction
+    const lookTarget = new THREE.Vector3(
+      camera.position.x - Math.sin(yaw.current) * Math.cos(pitch.current),
+      camera.position.y + Math.sin(pitch.current),
+      camera.position.z - Math.cos(yaw.current) * Math.cos(pitch.current)
+    )
+    camera.lookAt(lookTarget)
+  })
+
+  return null
 }
 
 /* ------------------------------------------------------------------ */
@@ -477,7 +573,7 @@ export function ImageScene({
         )}
 
         <Canvas
-          camera={{ position: [0, 0, 3.5], fov: 55 }}
+          camera={{ position: [0, 0, 0], fov: 70 }}
           style={{ background: "#030305" }}
         >
           <ambientLight intensity={0.5} />
@@ -493,16 +589,7 @@ export function ImageScene({
 
           <Environment preset="night" />
           <MoodEffects mood={mood} />
-          <OrbitControls
-            makeDefault
-            enablePan
-            enableZoom
-            minDistance={2}
-            maxDistance={12}
-            target={[0, 0, 1.5]}
-            autoRotate={loaded && !introDone}
-            autoRotateSpeed={1.5}
-          />
+          <FreeCamera active={loaded && !generating} intro={loaded && !introDone} />
         </Canvas>
       </div>
 
@@ -530,7 +617,7 @@ export function ImageScene({
         </div>
 
         <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-800">
-          drag to orbit · scroll to zoom
+          wasd to walk · drag to look
         </p>
       </div>
 
