@@ -8,7 +8,7 @@ import type { WorldViews } from "@/components/viewer/world-scene"
 
 export interface ArchiveEntry {
   id: string
-  kind: "world" | "image"
+  kind: "world" | "image" | "room"
   prompt?: string
   mood?: string
   views?: WorldViews
@@ -52,7 +52,7 @@ export async function loadArchive(): Promise<ArchiveEntry[]> {
 }
 
 export async function saveWorld(entry: {
-  kind: "world" | "image"
+  kind: "world" | "image" | "room"
   prompt?: string
   mood?: string
   views?: WorldViews

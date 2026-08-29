@@ -7,6 +7,7 @@ import { PromptInput } from "@/components/ui/prompt-input"
 import { Scene } from "@/components/viewer/scene"
 import { ImageScene } from "@/components/viewer/image-scene"
 import { WorldScene, type WorldViews } from "@/components/viewer/world-scene"
+import { RoomScene } from "@/components/viewer/room-scene"
 import { ArchivePanel } from "@/components/landing/archive-panel"
 import { saveWorld, type ArchiveEntry } from "@/lib/archive"
 import { preloadDepthModel } from "@/lib/depth"
@@ -150,6 +151,9 @@ export function HeroSection() {
 
   // 4-view surrounding world (prompt flow)
   const [worldViews, setWorldViews] = useState<WorldViews | null>(null)
+  // Layered-depth room (prompt flow — memories as rooms)
+  const [roomImage, setRoomImage] = useState<string | null>(null)
+  const [roomStack, setRoomStack] = useState<string[]>([])
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [lastPrompt, setLastPrompt] = useState<string | undefined>()
   const [worldStack, setWorldStack] = useState<WorldViews[]>([])
@@ -233,13 +237,14 @@ export function HeroSection() {
 
     try {
       preloadDepthModel()
-      // 4-view surrounding 3D world — free, no keys
-      const views = await imagineWorld(promptText)
-      setWorldViews(views)
-      setWorldStack([views])
-      setActiveWorldIndex(0)
+      // Memory as room: layered-depth interior, free, no keys
+      const imageUrl = await imagine(
+        `${promptText}, wide interior room view, perspective from inside the space`
+      )
+      setRoomImage(imageUrl)
+      setRoomStack([imageUrl])
       setLastPrompt(promptText)
-      saveWorld({ kind: "world", prompt: promptText, mood, views })
+      saveWorld({ kind: "room", prompt: promptText, mood, image: imageUrl })
     } catch (err: any) {
       // Fallback: single-image terrain world
       try {
@@ -260,13 +265,14 @@ export function HeroSection() {
     setGenError(null)
 
     try {
-      const views = await imagineWorld(promptText)
-      const newStack = [...worldStack, views]
-      setWorldStack(newStack)
-      setActiveWorldIndex(newStack.length - 1)
-      setWorldViews(views)
+      const imageUrl = await imagine(
+        `${promptText}, wide interior room view, perspective from inside the space`
+      )
+      const newStack = [...roomStack, imageUrl]
+      setRoomStack(newStack)
+      setRoomImage(imageUrl)
       setLastPrompt(promptText)
-      saveWorld({ kind: "world", prompt: promptText, mood, views })
+      saveWorld({ kind: "room", prompt: promptText, mood, image: imageUrl })
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
     } finally {
@@ -282,13 +288,24 @@ export function HeroSection() {
     setWorldViews(null)
     setWorldStack([])
     setActiveWorldIndex(0)
+    setRoomImage(null)
+    setRoomStack([])
     setGenError(null)
   }
 
   const handleArchiveLoad = (entry: ArchiveEntry) => {
     setArchiveOpen(false)
     setGenError(null)
-    if (entry.kind === "world" && entry.views) {
+    if (entry.kind === "room" && entry.image) {
+      setAssetType("image")
+      setSourceType("text")
+      setMood((entry.mood as MoodId) ?? "lucid")
+      setLastPrompt(entry.prompt)
+      setWorldViews(null)
+      setRoomImage(entry.image)
+      setRoomStack([entry.image])
+      setAssetUrl(undefined)
+    } else if (entry.kind === "world" && entry.views) {
       setAssetType("image")
       setSourceType("text")
       setMood((entry.mood as MoodId) ?? "lucid")
@@ -307,6 +324,40 @@ export function HeroSection() {
       setActiveMemoryIndex(0)
       setAssetUrl(entry.image)
     }
+  }
+
+  if (roomImage) {
+    return (
+      <section className="px-4 py-6 pt-20 max-w-7xl mx-auto">
+        <button
+          onClick={handleReturn}
+          className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
+        >
+          ← return
+        </button>
+        {roomStack.length > 1 && (
+          <div className="flex items-center gap-2 mb-4">
+            {roomStack.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setRoomImage(roomStack[i])}
+                className={`w-2 h-2 rounded-full transition-all ${i === roomStack.indexOf(roomImage) ? "bg-violet-400 shadow-[0_0_6px_rgba(167,139,250,0.6)]" : "bg-neutral-800 hover:bg-neutral-700"}`}
+              />
+            ))}
+            <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 ml-2">
+              room {roomStack.indexOf(roomImage) + 1}/{roomStack.length}
+            </span>
+          </div>
+        )}
+        <RoomScene
+          imageUrl={roomImage}
+          generating={generating}
+          error={genError}
+          onPromptExpand={handlePromptExpand}
+          mood={mood}
+        />
+      </section>
+    )
   }
 
   if (worldViews) {
