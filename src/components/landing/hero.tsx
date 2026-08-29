@@ -7,6 +7,8 @@ import { PromptInput } from "@/components/ui/prompt-input"
 import { Scene } from "@/components/viewer/scene"
 import { ImageScene } from "@/components/viewer/image-scene"
 import { WorldScene, type WorldViews } from "@/components/viewer/world-scene"
+import { ArchivePanel } from "@/components/landing/archive-panel"
+import { saveWorld, type ArchiveEntry } from "@/lib/archive"
 import { MOODS, type MoodId } from "@/lib/moods"
 
 
@@ -147,6 +149,8 @@ export function HeroSection() {
 
   // 4-view surrounding world (prompt flow)
   const [worldViews, setWorldViews] = useState<WorldViews | null>(null)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [lastPrompt, setLastPrompt] = useState<string | undefined>()
   const [worldStack, setWorldStack] = useState<WorldViews[]>([])
   const [activeWorldIndex, setActiveWorldIndex] = useState(0)
 
@@ -232,6 +236,8 @@ export function HeroSection() {
       setWorldViews(views)
       setWorldStack([views])
       setActiveWorldIndex(0)
+      setLastPrompt(promptText)
+      saveWorld({ kind: "world", prompt: promptText, mood, views })
     } catch (err: any) {
       // Fallback: single-image terrain world
       try {
@@ -257,6 +263,8 @@ export function HeroSection() {
       setWorldStack(newStack)
       setActiveWorldIndex(newStack.length - 1)
       setWorldViews(views)
+      setLastPrompt(promptText)
+      saveWorld({ kind: "world", prompt: promptText, mood, views })
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
     } finally {
@@ -273,6 +281,30 @@ export function HeroSection() {
     setWorldStack([])
     setActiveWorldIndex(0)
     setGenError(null)
+  }
+
+  const handleArchiveLoad = (entry: ArchiveEntry) => {
+    setArchiveOpen(false)
+    setGenError(null)
+    if (entry.kind === "world" && entry.views) {
+      setAssetType("image")
+      setSourceType("text")
+      setMood((entry.mood as MoodId) ?? "lucid")
+      setLastPrompt(entry.prompt)
+      setWorldViews(entry.views)
+      setWorldStack([entry.views])
+      setActiveWorldIndex(0)
+      setAssetUrl(undefined)
+    } else if (entry.image) {
+      setAssetType("image")
+      setSourceType("image")
+      setMood((entry.mood as MoodId) ?? "lucid")
+      setWorldViews(null)
+      setWorldStack([])
+      setMemoryStack([entry.image])
+      setActiveMemoryIndex(0)
+      setAssetUrl(entry.image)
+    }
   }
 
   if (worldViews) {
@@ -431,6 +463,14 @@ export function HeroSection() {
           />
         </div>
 
+        {/* Memory archive link */}
+        <button
+          onClick={() => setArchiveOpen(true)}
+          className="mt-10 text-[10px] tracking-[0.3em] uppercase text-neutral-600 hover:text-violet-400 transition-colors"
+        >
+          ⟡ memory archive
+        </button>
+
         {/* Prompt chips */}
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           {[
@@ -466,6 +506,12 @@ export function HeroSection() {
           </div>
         </div>
       )}
+
+      <ArchivePanel
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        onLoad={handleArchiveLoad}
+      />
 
       {/* Scroll indicator */}
       <div className="absolute bottom-6 inset-x-0 z-10 flex items-center justify-center gap-2">

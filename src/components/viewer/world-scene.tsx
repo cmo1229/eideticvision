@@ -6,51 +6,12 @@ import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/pos
 import * as THREE from "three"
 import { getMood, type MoodId } from "@/lib/moods"
 import { PromptInput } from "@/components/ui/prompt-input"
+import { estimateDepth } from "@/lib/depth"
+import { startAmbience, stopAmbience } from "@/lib/ambience"
 
 /* ------------------------------------------------------------------ */
 /*  Depth estimation (shared logic)                                     */
 /* ------------------------------------------------------------------ */
-
-function computeDepthFromImage(img: HTMLImageElement): Float32Array {
-  const w = Math.min(img.width, 256)
-  const h = Math.min(img.height, Math.floor(w * (img.height / img.width)))
-
-  const canvas = document.createElement("canvas")
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext("2d")!
-  ctx.drawImage(img, 0, 0, w, h)
-  const src = ctx.getImageData(0, 0, w, h)
-
-  const depth = new Float32Array(w * h)
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4
-      const lum = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255
-      const vertFactor = 1 - y / h
-
-      let contrast = 0
-      if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
-        const center = (src.data[i] + src.data[i + 1] + src.data[i + 2]) / 3
-        for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-            const ni = ((y + dy) * w + (x + dx)) * 4
-            const n = (src.data[ni] + src.data[ni + 1] + src.data[ni + 2]) / 3
-            contrast += Math.abs(center - n)
-          }
-        }
-        contrast /= 9 * 255
-      }
-
-      let d = vertFactor * 0.5 + lum * 0.25 + contrast * 0.25
-      if (contrast > 0.08) d += contrast * 0.3
-      depth[y * w + x] = Math.max(0, Math.min(1, d))
-    }
-  }
-
-  return depth
-}
 
 /* ------------------------------------------------------------------ */
 /*  World wall geometry — depth pushes geometry toward the flyer        */
@@ -63,9 +24,11 @@ const WALL_H = 28
 const WALL_DIST = 28
 const WALL_DEPTH_SCALE = 12
 
-function buildWallGeometry(depthData: Float32Array): THREE.BufferGeometry {
-  const dw = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
-  const dh = dw
+function buildWallGeometry(
+  depthData: Float32Array,
+  dw: number,
+  dh: number
+): THREE.BufferGeometry {
 
   const vertices: number[] = []
   const uvs: number[] = []
@@ -127,17 +90,10 @@ function WorldWall({
     let cancelled = false
 
     async function build() {
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const i = new Image()
-        i.crossOrigin = "anonymous"
-        i.onload = () => resolve(i)
-        i.onerror = () => reject(new Error("wall image failed"))
-        i.src = imageUrl
-      })
+      const { depth, width: dw, height: dh } = await estimateDepth(imageUrl)
       if (cancelled) return
 
-      const depthData = computeDepthFromImage(img)
-      const geo = buildWallGeometry(depthData)
+      const geo = buildWallGeometry(depth, dw, dh)
 
       const tex = await new Promise<THREE.Texture>((resolve, reject) => {
         new THREE.TextureLoader().load(
@@ -349,6 +305,62 @@ function WorldParticles() {
   )
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  Drifting fog layers — procedural noise planes, slowly scrolling     */
+/* ------------------------------------------------------------------ */
+
+function makeFogTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas")
+  c.width = 256
+  c.height = 256
+  const ctx = c.getContext("2d")!
+  ctx.fillStyle = "rgba(0,0,0,0)"
+  ctx.fillRect(0, 0, 256, 256)
+  for (let i = 0; i < 60; i++) {
+    const x = Math.random() * 256
+    const y = Math.random() * 256
+    const r = 20 + Math.random() * 60
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+    const violet = Math.random() > 0.5
+    g.addColorStop(0, violet ? "rgba(167,139,250,0.10)" : "rgba(103,232,249,0.07)")
+    g.addColorStop(1, "rgba(0,0,0,0)")
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  const tex = new THREE.CanvasTexture(c)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  return tex
+}
+
+function FogLayers() {
+  const tex1 = useMemo(() => makeFogTexture(), [])
+  const tex2 = useMemo(() => makeFogTexture(), [])
+
+  useFrame((_, delta) => {
+    tex1.offset.x += delta * 0.008
+    tex1.offset.y += delta * 0.003
+    tex2.offset.x -= delta * 0.005
+    tex2.offset.y += delta * 0.004
+  })
+
+  return (
+    <group>
+      <mesh position={[0, WALL_H * 0.45, -WALL_DIST * 0.45]}>
+        <planeGeometry args={[WALL_DIST * 1.6, WALL_H * 0.8]} />
+        <meshBasicMaterial map={tex1} transparent opacity={0.5} depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+      <mesh position={[0, WALL_H * 0.3, WALL_DIST * 0.3]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[WALL_DIST * 1.6, WALL_H * 0.7]} />
+        <meshBasicMaterial map={tex2} transparent opacity={0.4} depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+    </group>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /*  WorldScene — surrounding 3D world from 4 generated views            */
 /* ------------------------------------------------------------------ */
@@ -382,10 +394,18 @@ export function WorldScene({
   mood = "lucid",
 }: WorldSceneProps) {
   const [wallsReady, setWallsReady] = useState(0)
+  const [soundOn, setSoundOn] = useState(false)
 
   useEffect(() => {
     setWallsReady(0)
   }, [views])
+
+  // Ambience follows the world
+  useEffect(() => {
+    if (soundOn && wallsReady >= 4) startAmbience(mood)
+    else stopAmbience()
+    return () => stopAmbience()
+  }, [soundOn, wallsReady, mood])
 
   const loaded = wallsReady >= 4
 
@@ -469,6 +489,7 @@ export function WorldScene({
           </mesh>
 
           <WorldParticles />
+          <FogLayers />
           <WorldEffects mood={mood} />
           <FlightCamera active={loaded && !generating} />
         </Canvas>
@@ -493,6 +514,12 @@ export function WorldScene({
               >
                 {getMood(mood).label}
               </span>
+              <button
+                onClick={() => setSoundOn((v) => !v)}
+                className={`text-[10px] tracking-[0.2em] uppercase transition-colors ${soundOn ? "text-violet-400" : "text-neutral-700 hover:text-neutral-500"}`}
+              >
+                {soundOn ? "◉ sound" : "○ sound"}
+              </button>
             </>
           ) : null}
         </div>

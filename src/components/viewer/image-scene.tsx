@@ -7,77 +7,12 @@ import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/pos
 import * as THREE from "three"
 import { getMood, type MoodId } from "@/lib/moods"
 import { PromptInput } from "@/components/ui/prompt-input"
+import { estimateDepth } from "@/lib/depth"
+import { startAmbience, stopAmbience } from "@/lib/ambience"
 
 /* ------------------------------------------------------------------ */
 /*  Client-side depth estimation from image                             */
 /* ------------------------------------------------------------------ */
-
-function computeDepthFromImage(img: HTMLImageElement): string {
-  const w = Math.min(img.width, 256)
-  const h = Math.min(img.height, Math.floor(w * (img.height / img.width)))
-
-  const canvas = document.createElement("canvas")
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext("2d")!
-  ctx.drawImage(img, 0, 0, w, h)
-  const src = ctx.getImageData(0, 0, w, h)
-  const out = ctx.createImageData(w, h)
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4
-      const lum = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255
-      const vertFactor = 1 - y / h
-
-      let contrast = 0
-      if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
-        const center = (src.data[i] + src.data[i + 1] + src.data[i + 2]) / 3
-        for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-            const ni = ((y + dy) * w + (x + dx)) * 4
-            const n = (src.data[ni] + src.data[ni + 1] + src.data[ni + 2]) / 3
-            contrast += Math.abs(center - n)
-          }
-        }
-        contrast /= 9 * 255
-      }
-
-      let depth = vertFactor * 0.55 + lum * 0.25 + contrast * 0.2
-      if (contrast > 0.08) depth += contrast * 0.3
-      depth = Math.max(0, Math.min(1, depth))
-
-      const val = Math.floor(depth * 255)
-      out.data[i] = val
-      out.data[i + 1] = val
-      out.data[i + 2] = val
-      out.data[i + 3] = 255
-    }
-  }
-
-  ctx.putImageData(out, 0, 0)
-  return canvas.toDataURL("image/png")
-}
-
-function loadDepthData(depthDataUrl: string): Promise<Float32Array> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      const canvas = document.createElement("canvas")
-      canvas.width = img.width
-      canvas.height = img.height
-      const ctx = canvas.getContext("2d")!
-      ctx.drawImage(img, 0, 0)
-      const pixels = ctx.getImageData(0, 0, img.width, img.height).data
-      const depth = new Float32Array(img.width * img.height)
-      for (let i = 0; i < depth.length; i++) {
-        depth[i] = pixels[i * 4] / 255
-      }
-      resolve(depth)
-    }
-    img.src = depthDataUrl
-  })
-}
 
 /* ------------------------------------------------------------------ */
 /*  Open terrain world — depth becomes hills, no walls, fades to fog     */
@@ -88,9 +23,11 @@ const TERRAIN_SEGS = 200
 const TERRAIN_MAX_HEIGHT = 10
 const DEPTH_SCALE = 8.0
 
-function buildTerrainGeometry(depthData: Float32Array): THREE.BufferGeometry {
-  const dw = Math.min(256, Math.floor(Math.sqrt(depthData.length)))
-  const dh = dw
+function buildTerrainGeometry(
+  depthData: Float32Array,
+  dw: number,
+  dh: number
+): THREE.BufferGeometry {
 
   const vertices: number[] = []
   const uvs: number[] = []
@@ -171,28 +108,16 @@ function DepthMesh({
       if (sourceType === "text") {
         // Text prompt: no source image, use flat depth (all zeros) for gentle curve
         const flatDepth = new Float32Array(256 * 256) // all zeros
-        geo = buildTerrainGeometry(flatDepth)
+        geo = buildTerrainGeometry(flatDepth, 256, 256)
 
         // Video is the texture (or will be swapped in)
         textureUrl = videoUrl ?? imageUrl
       } else {
-        // Image upload: full depth computation
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const i = new Image()
-          i.crossOrigin = "anonymous"
-          i.onload = () => resolve(i)
-          i.onerror = () => reject(new Error("Failed to load capture image"))
-          i.src = imageUrl
-        })
-
+        // Image upload: neural depth (fallback built-in)
+        const { depth, width: dw, height: dh } = await estimateDepth(imageUrl)
         if (cancelled) return
 
-        const depthDataUrl = computeDepthFromImage(img)
-        const depthData = await loadDepthData(depthDataUrl)
-
-        if (cancelled) return
-
-        geo = buildTerrainGeometry(depthData)
+        geo = buildTerrainGeometry(depth, dw, dh)
         textureUrl = imageUrl
       }
 
@@ -590,6 +515,7 @@ export function ImageScene({
   const [loaded, setLoaded] = useState(false)
   const [introDone, setIntroDone] = useState(false)
   const [recalling, setRecalling] = useState(true)
+  const [soundOn, setSoundOn] = useState(false)
 
   useEffect(() => {
     if (!loaded) return
@@ -603,6 +529,13 @@ export function ImageScene({
     const t = setTimeout(() => setRecalling(false), 3000)
     return () => clearTimeout(t)
   }, [loaded])
+
+  // Ambience
+  useEffect(() => {
+    if (soundOn && loaded) startAmbience(mood)
+    else stopAmbience()
+    return () => stopAmbience()
+  }, [soundOn, loaded, mood])
 
   return (
     <div className="relative w-full">
@@ -700,6 +633,12 @@ export function ImageScene({
               >
                 {getMood(mood).label}
               </span>
+              <button
+                onClick={() => setSoundOn((v) => !v)}
+                className={`text-[10px] tracking-[0.2em] uppercase transition-colors ${soundOn ? "text-violet-400" : "text-neutral-700 hover:text-neutral-500"}`}
+              >
+                {soundOn ? "◉ sound" : "○ sound"}
+              </button>
             </>
           ) : null}
         </div>
