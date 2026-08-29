@@ -289,8 +289,7 @@ function DustParticles() {
   })
 
   return (
-    <points ref={pointsRef}>
-      <bufferGeometry />
+    <points ref={pointsRef} geometry={geo}>
       <pointsMaterial
         size={0.015}
         color="#c4b5fd"

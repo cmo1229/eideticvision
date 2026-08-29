@@ -177,10 +177,11 @@ function DepthMesh({
         textureUrl = videoUrl ?? imageUrl
       } else {
         // Image upload: full depth computation
-        const img = await new Promise<HTMLImageElement>((resolve) => {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
           const i = new Image()
           i.crossOrigin = "anonymous"
           i.onload = () => resolve(i)
+          i.onerror = () => reject(new Error("Failed to load capture image"))
           i.src = imageUrl
         })
 
@@ -228,11 +229,16 @@ function DepthMesh({
         }
       } else {
         // Image: load image texture
-        const tex = await new Promise<THREE.Texture>((resolve) => {
-          new THREE.TextureLoader().load(textureUrl, (t) => {
-            t.colorSpace = THREE.SRGBColorSpace
-            resolve(t)
-          })
+        const tex = await new Promise<THREE.Texture>((resolve, reject) => {
+          new THREE.TextureLoader().load(
+            textureUrl,
+            (t) => {
+              t.colorSpace = THREE.SRGBColorSpace
+              resolve(t)
+            },
+            undefined,
+            () => reject(new Error("Failed to load texture"))
+          )
         })
 
         if (cancelled) return
@@ -442,8 +448,7 @@ function MemoryParticles() {
   })
 
   return (
-    <points ref={pointsRef}>
-      <bufferGeometry />
+    <points ref={pointsRef} geometry={geo}>
       <pointsMaterial
         size={0.04}
         color="#c4b5fd"
