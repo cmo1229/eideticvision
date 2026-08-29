@@ -6,6 +6,7 @@ import { FileUploader, type UploadedAsset } from "@/components/ui/file-uploader"
 import { PromptInput } from "@/components/ui/prompt-input"
 import { Scene } from "@/components/viewer/scene"
 import { ImageScene } from "@/components/viewer/image-scene"
+import { WorldScene, type WorldViews } from "@/components/viewer/world-scene"
 import { MOODS, type MoodId } from "@/lib/moods"
 
 
@@ -131,6 +132,7 @@ export function HeroSection() {
   const [assetType, setAssetType] = useState<string>("glb")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [genPhase, setGenPhase] = useState("building your world · 4 views")
   const [upgrading, setUpgrading] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -142,6 +144,11 @@ export function HeroSection() {
   // Memory stack for chained prompt expansion (images, not videos)
   const [memoryStack, setMemoryStack] = useState<string[]>([])
   const [activeMemoryIndex, setActiveMemoryIndex] = useState(0)
+
+  // 4-view surrounding world (prompt flow)
+  const [worldViews, setWorldViews] = useState<WorldViews | null>(null)
+  const [worldStack, setWorldStack] = useState<WorldViews[]>([])
+  const [activeWorldIndex, setActiveWorldIndex] = useState(0)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -157,6 +164,26 @@ export function HeroSection() {
       reader.onerror = () => reject(new Error("Failed to read generated image"))
       reader.readAsDataURL(data)
     })
+  }
+
+  // 4-view surrounding world — sequential /api/imagine calls from the client,
+  // with live progress (avoids serverless timeouts, dodges rate limits)
+  const VIEW_DIRS = [
+    { key: "front", dir: "frontal wide view, centered composition, facing the scene head-on" },
+    { key: "right", dir: "wide view of the same location seen from the right side, ninety degrees turned" },
+    { key: "back", dir: "wide view of the same location seen from directly behind, opposite side" },
+    { key: "left", dir: "wide view of the same location seen from the left side, ninety degrees turned" },
+  ] as const
+
+  const imagineWorld = async (promptText: string): Promise<WorldViews> => {
+    const views: Partial<WorldViews> = {}
+    for (let i = 0; i < VIEW_DIRS.length; i++) {
+      const v = VIEW_DIRS[i]
+      setGenPhase(`building world · view ${i + 1}/4`)
+      views[v.key] = await imagine(`${promptText}, ${v.dir}`)
+    }
+    setGenPhase("building your world")
+    return views as WorldViews
   }
 
   // Fire Runway video generation; swaps into the viewer when ready
@@ -197,18 +224,25 @@ export function HeroSection() {
     setGenError(null)
     setMemoryStack([])
     setVideoUrl(null)
+    setAssetUrl(undefined)
 
     try {
-      // Fast path: Pollinations image → world appears in seconds
-      const imageUrl = await imagine(promptText)
-      setAssetUrl(imageUrl)
-      setMemoryStack([imageUrl])
-      setActiveMemoryIndex(0)
-      setGenerating(false)
-      // Slow path: Runway video swaps in when ready
-      upgradeToVideo({ promptText })
+      // 4-view surrounding 3D world — free, no keys
+      const views = await imagineWorld(promptText)
+      setWorldViews(views)
+      setWorldStack([views])
+      setActiveWorldIndex(0)
     } catch (err: any) {
-      setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
+      // Fallback: single-image terrain world
+      try {
+        const imageUrl = await imagine(promptText)
+        setAssetUrl(imageUrl)
+        setMemoryStack([imageUrl])
+        setActiveMemoryIndex(0)
+      } catch (err2: any) {
+        setGenError(err2?.response?.data?.error ?? err2?.message ?? "Generation failed")
+      }
+    } finally {
       setGenerating(false)
     }
   }
@@ -218,16 +252,14 @@ export function HeroSection() {
     setGenError(null)
 
     try {
-      const imageUrl = await imagine(promptText)
-      const newStack = [...memoryStack, imageUrl]
-      setMemoryStack(newStack)
-      setActiveMemoryIndex(newStack.length - 1)
-      setAssetUrl(imageUrl)
-      setVideoUrl(null)
-      setGenerating(false)
-      upgradeToVideo({ promptText })
+      const views = await imagineWorld(promptText)
+      const newStack = [...worldStack, views]
+      setWorldStack(newStack)
+      setActiveWorldIndex(newStack.length - 1)
+      setWorldViews(views)
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
+    } finally {
       setGenerating(false)
     }
   }
@@ -237,7 +269,36 @@ export function HeroSection() {
     setVideoUrl(null)
     setMemoryStack([])
     setActiveMemoryIndex(0)
+    setWorldViews(null)
+    setWorldStack([])
+    setActiveWorldIndex(0)
     setGenError(null)
+  }
+
+  if (worldViews) {
+    return (
+      <section className="px-4 py-6 max-w-7xl mx-auto">
+        <button
+          onClick={handleReturn}
+          className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
+        >
+          ← return
+        </button>
+        <WorldScene
+          views={worldViews}
+          generating={generating}
+          error={genError}
+          onPromptExpand={handlePromptExpand}
+          worldCount={worldStack.length}
+          activeWorldIndex={activeWorldIndex}
+          onWorldSelect={(i) => {
+            setActiveWorldIndex(i)
+            setWorldViews(worldStack[i])
+          }}
+          mood={mood}
+        />
+      </section>
+    )
   }
 
   if (assetUrl && assetType === "image") {
@@ -394,13 +455,13 @@ export function HeroSection() {
         <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center">
           <div className="max-w-sm w-full px-8">
             <p className="text-[11px] tracking-[0.3em] uppercase text-violet-400/80 text-center mb-6 animate-pulse">
-              imagining the memory
+              {genPhase}
             </p>
             <div className="relative w-full h-[1px] bg-neutral-800/60 overflow-visible">
               <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-violet-500 to-transparent animate-[shimmer_1.6s_ease-in-out_infinite]" style={{ left: "35%" }} />
             </div>
             <p className="text-[10px] tracking-[0.2em] uppercase text-neutral-600 text-center mt-4">
-              this takes a few seconds
+              imagining every direction · this takes a moment
             </p>
           </div>
         </div>
