@@ -269,7 +269,7 @@ export function ClosingSection() {
         </span>
         <span className="w-1 h-1 rounded-full bg-neutral-800" />
         <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-700">
-          runway gen-4.5
+          pollinations
         </span>
         <span className="w-1 h-1 rounded-full bg-neutral-800" />
         <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-700">

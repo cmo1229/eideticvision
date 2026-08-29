@@ -323,7 +323,7 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
 
   /* neural memory */
   const [neuralGenerating, setNeuralGenerating] = useState(false)
-  const [neuralVideo, setNeuralVideo] = useState<string | null>(null)
+  const [neuralImage, setNeuralImage] = useState<string | null>(null)
   const [neuralError, setNeuralError] = useState<string | null>(null)
   const [showNeural, setShowNeural] = useState(false)
   const [neuralProgress, setNeuralProgress] = useState(0)
@@ -332,9 +332,9 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
 
   const NEURAL_PHASES = [
     { at: 0, label: "capturing frame" },
-    { at: 15, label: "sending to runway" },
-    { at: 35, label: "Gen-4.5 processing" },
-    { at: 60, label: "rendering neural memory" },
+    { at: 15, label: "imagining the scene" },
+    { at: 35, label: "rendering neural memory" },
+    { at: 60, label: "coloring the memory" },
     { at: 85, label: "almost there" },
   ]
 
@@ -465,13 +465,13 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
     }, 250)
 
     try {
-      const frameUrl = canvas.toDataURL("image/jpeg", 0.9)
       const prompt = STYLE_PROMPTS[activeStyle.id] ?? STYLE_PROMPTS.ethereal
-      const { data } = await axios.post("/api/generate", {
-        imageUrl: frameUrl,
-        style: activeStyle.id,
-        prompt,
-        duration: 5,
+      const { data } = await axios.post("/api/imagine", { prompt, mood: activeStyle.id }, { responseType: "blob" })
+      const imageUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error("Failed to read generated image"))
+        reader.readAsDataURL(data)
       })
 
       // Completion burst
@@ -481,7 +481,7 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
       // Brief pause at 100% before revealing
       await new Promise((r) => setTimeout(r, 600))
 
-      setNeuralVideo(data.videoUrls[0] ?? null)
+      setNeuralImage(imageUrl)
       setShowNeural(true)
     } catch (err: any) {
       if (neuralTimerRef.current) clearInterval(neuralTimerRef.current)
@@ -636,22 +636,19 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
 
             {/* Style label */}
             <p className="text-[9px] tracking-[0.25em] uppercase text-neutral-700 text-center mt-6">
-              {activeStyle.label} · gen4.5
+              {activeStyle.label} · imagined
             </p>
           </div>
         </div>
       )}
 
       {/* Neural memory overlay */}
-      {showNeural && neuralVideo && (
+      {showNeural && neuralImage && (
         <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center">
           <div className="relative max-w-4xl w-full">
-            <video
-              src={neuralVideo}
-              controls
-              autoPlay
-              loop
-              playsInline
+            <img
+              src={neuralImage}
+              alt="neural memory"
               className="w-full border border-neutral-800/50"
             />
             <button
@@ -672,8 +669,8 @@ export function Scene({ assetUrl, assetType }: SceneProps) {
               back to viewer
             </button>
             <a
-              href={neuralVideo}
-              download={`eidetic-neural-${Date.now()}.mp4`}
+              href={neuralImage}
+              download={`eidetic-neural-${Date.now()}.png`}
               className="text-[11px] tracking-[0.25em] uppercase text-violet-400/70 hover:text-violet-300 transition-colors border border-violet-500/30 px-6 py-2 hover:border-violet-500/60"
             >
               download

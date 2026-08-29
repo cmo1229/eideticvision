@@ -484,7 +484,7 @@ const PHASES = [
   { at: 0, label: "reading capture" },
   { at: 12, label: "estimating depth" },
   { at: 25, label: "building spatial mesh" },
-  { at: 35, label: "Gen-4.5 processing" },
+  { at: 35, label: "imagining the memory" },
   { at: 60, label: "rendering spatial memory" },
   { at: 85, label: "almost there" },
 ]
@@ -544,7 +544,7 @@ function GenerationOverlay() {
         </p>
 
         <p className="text-[9px] tracking-[0.25em] uppercase text-neutral-700 text-center mt-6">
-          spatial depth · gen4.5
+          spatial depth · imagined
         </p>
       </div>
     </div>
@@ -557,7 +557,6 @@ function GenerationOverlay() {
 
 interface ImageSceneProps {
   imageUrl: string
-  videoUrls?: string[]
   depthUrl?: string | null
   generating: boolean
   error: string | null
@@ -571,7 +570,6 @@ interface ImageSceneProps {
 
 export function ImageScene({
   imageUrl,
-  videoUrls,
   depthUrl,
   generating,
   error,
@@ -585,11 +583,6 @@ export function ImageScene({
   const [loaded, setLoaded] = useState(false)
   const [introDone, setIntroDone] = useState(false)
   const [recalling, setRecalling] = useState(true)
-  const showVideo = videoUrls && videoUrls.length > 0
-
-  const activeVideo = memoryStack && memoryStack.length > 0
-    ? memoryStack[activeMemoryIndex]
-    : showVideo ? videoUrls![0] : undefined
 
   useEffect(() => {
     if (!loaded) return
@@ -668,7 +661,6 @@ export function ImageScene({
 
           <DepthMesh
             imageUrl={imageUrl}
-            videoUrl={activeVideo}
             sourceType={sourceType}
             onLoad={() => setLoaded(true)}
           />
@@ -692,7 +684,7 @@ export function ImageScene({
           ) : loaded ? (
             <>
               <span className="text-[11px] tracking-[0.25em] uppercase text-neutral-500">
-                {activeVideo ? "spatial memory ready" : "capture loaded"}
+                spatial memory ready
               </span>
               <span
                 className="text-[10px] tracking-[0.2em] uppercase"

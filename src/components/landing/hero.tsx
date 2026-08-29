@@ -129,7 +129,6 @@ function VisualSteps() {
 export function HeroSection() {
   const [assetUrl, setAssetUrl] = useState<string | undefined>()
   const [assetType, setAssetType] = useState<string>("glb")
-  const [videoUrls, setVideoUrls] = useState<string[] | undefined>()
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -138,7 +137,7 @@ export function HeroSection() {
   const [mood, setMood] = useState<MoodId>("lucid")
   const [sourceType, setSourceType] = useState<"image" | "text">("image")
 
-  // Memory stack for chained prompt expansion
+  // Memory stack for chained prompt expansion (images, not videos)
   const [memoryStack, setMemoryStack] = useState<string[]>([])
   const [activeMemoryIndex, setActiveMemoryIndex] = useState(0)
 
@@ -146,28 +145,31 @@ export function HeroSection() {
 
   const handleComplete = async (asset: UploadedAsset) => {
     if (asset.type === "image") {
-      setAssetUrl(asset.url)
+      // No API needed: client-side depth pipeline handles everything
       setAssetType("image")
       setSourceType("image")
-      setGenerating(true)
       setGenError(null)
-
-      try {
-        const { data } = await axios.post("/api/generate", { imageUrl: asset.url, mood })
-        setVideoUrls(data.videoUrls)
-        if (data.videoUrls?.[0]) {
-          setMemoryStack([data.videoUrls[0]])
-          setActiveMemoryIndex(0)
-        }
-      } catch (err: any) {
-        setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
-      } finally {
-        setGenerating(false)
-      }
+      setMemoryStack([asset.url])
+      setActiveMemoryIndex(0)
+      setAssetUrl(asset.url)
       return
     }
     setAssetType(asset.type)
     setAssetUrl(asset.url)
+  }
+
+  const imagine = async (promptText: string): Promise<string> => {
+    const { data } = await axios.post(
+      "/api/imagine",
+      { prompt: promptText, mood },
+      { responseType: "blob" }
+    )
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(new Error("Failed to read generated image"))
+      reader.readAsDataURL(data)
+    })
   }
 
   const handlePrompt = async (promptText: string) => {
@@ -178,13 +180,10 @@ export function HeroSection() {
     setMemoryStack([])
 
     try {
-      const { data } = await axios.post("/api/generate", { promptText, mood, duration: 5 })
-      setVideoUrls(data.videoUrls)
-      if (data.videoUrls?.[0]) {
-        setAssetUrl(data.videoUrls[0])
-        setMemoryStack([data.videoUrls[0]])
-        setActiveMemoryIndex(0)
-      }
+      const imageUrl = await imagine(promptText)
+      setAssetUrl(imageUrl)
+      setMemoryStack([imageUrl])
+      setActiveMemoryIndex(0)
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
     } finally {
@@ -197,13 +196,11 @@ export function HeroSection() {
     setGenError(null)
 
     try {
-      const { data } = await axios.post("/api/generate", { promptText, mood, duration: 5 })
-      if (data.videoUrls?.[0]) {
-        const newStack = [...memoryStack, data.videoUrls[0]]
-        setMemoryStack(newStack)
-        setActiveMemoryIndex(newStack.length - 1)
-        setVideoUrls(data.videoUrls)
-      }
+      const imageUrl = await imagine(promptText)
+      const newStack = [...memoryStack, imageUrl]
+      setMemoryStack(newStack)
+      setActiveMemoryIndex(newStack.length - 1)
+      setAssetUrl(imageUrl)
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
     } finally {
@@ -213,7 +210,6 @@ export function HeroSection() {
 
   const handleReturn = () => {
     setAssetUrl(undefined)
-    setVideoUrls(undefined)
     setMemoryStack([])
     setActiveMemoryIndex(0)
     setGenError(null)
@@ -229,8 +225,7 @@ export function HeroSection() {
           ← return
         </button>
         <ImageScene
-          imageUrl={assetUrl}
-          videoUrls={videoUrls}
+          imageUrl={memoryStack[activeMemoryIndex] ?? assetUrl}
           generating={generating}
           error={genError}
           onPromptExpand={handlePromptExpand}
