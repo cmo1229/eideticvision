@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import * as THREE from "three"
 import { getMood, type MoodId } from "@/lib/moods"
-import { buildLdi, type LdiLayer } from "@/lib/ldi"
+import { planRoom, buildObjectMesh, type PlannedObject } from "@/lib/room-objects"
 import { startAmbience, stopAmbience } from "@/lib/ambience"
 import { PromptInput } from "@/components/ui/prompt-input"
 import { NavHud, navInput } from "./nav-hud"
@@ -26,30 +26,6 @@ const WALL_IMG_H = WALL_IMG_W * 0.62
 /* ------------------------------------------------------------------ */
 /*  Layer mesh — one depth slice of the memory                          */
 /* ------------------------------------------------------------------ */
-
-function LdiLayerMesh({ layer }: { layer: LdiLayer }) {
-  const tex = useMemo(() => {
-    const t = new THREE.TextureLoader().load(layer.texture)
-    t.colorSpace = THREE.SRGBColorSpace
-    return t
-  }, [layer.texture])
-
-  const z = LAYER_FAR_Z + layer.depth * LAYER_SPAN
-
-  return (
-    <mesh position={[0, ROOM_H * 0.52, z]} renderOrder={Math.round((1 - layer.depth) * 10)}>
-      <planeGeometry args={[WALL_IMG_W, WALL_IMG_H]} />
-      <meshBasicMaterial
-        map={tex}
-        transparent
-        alphaTest={0.02}
-        depthWrite={false}
-        side={THREE.DoubleSide}
-        toneMapped={false}
-      />
-    </mesh>
-  )
-}
 
 /* ------------------------------------------------------------------ */
 /*  Room shell — real walls, floor, ceiling                             */
@@ -290,6 +266,7 @@ function RoomParticles() {
 
 interface RoomSceneProps {
   imageUrl: string
+  prompt?: string
   generating: boolean
   error: string | null
   onPromptExpand?: (prompt: string) => void
@@ -298,51 +275,32 @@ interface RoomSceneProps {
 
 export function RoomScene({
   imageUrl,
+  prompt = "a quiet room",
   generating,
   error,
   onPromptExpand,
   mood = "lucid",
 }: RoomSceneProps) {
-  const [layers, setLayers] = useState<LdiLayer[] | null>(null)
   const [soundOn, setSoundOn] = useState(false)
 
-  useEffect(() => {
-    setLayers(null)
-    let cancelled = false
-    buildLdi(imageUrl, 5)
-      .then((r) => {
-        if (!cancelled) setLayers(r.layers)
-      })
-      .catch(() => {
-        if (!cancelled) setLayers([]) // fall back to backdrop only
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [imageUrl])
+  // Real 3D furniture planned from the prompt — deterministic per prompt
+  const objects = useMemo(() => planRoom(`${prompt} ${mood}`, 9), [prompt, mood])
+
+  const objectMeshes = useMemo(() => {
+    return objects.map((obj) => ({ obj, ...buildObjectMesh(obj, mood) }))
+  }, [objects, mood])
 
   useEffect(() => {
-    if (soundOn && layers) startAmbience(mood)
+    if (soundOn) startAmbience(mood)
     else stopAmbience()
     return () => stopAmbience()
-  }, [soundOn, layers, mood])
+  }, [soundOn, mood])
 
-  const loaded = layers !== null
+  const loaded = true
 
   return (
     <div className="relative w-full">
       <div className="relative w-full h-[75vh] overflow-hidden border border-neutral-800/30 bg-[#06060f]">
-        {!loaded && !generating && (
-          <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-10 backdrop-blur-md">
-            <p className="text-sm tracking-[0.3em] uppercase text-violet-400/80 animate-pulse">
-              reconstructing the room
-            </p>
-            <p className="text-[10px] tracking-[0.25em] uppercase text-neutral-700 mt-3">
-              carving depth layers
-            </p>
-          </div>
-        )}
-
         {error && (
           <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 backdrop-blur-md gap-4">
             <p className="text-sm tracking-[0.2em] uppercase text-red-400/70">generation failed</p>
@@ -359,14 +317,13 @@ export function RoomScene({
           <directionalLight position={[3, 8, 4]} intensity={0.6} />
           <directionalLight position={[-4, 3, -2]} intensity={0.2} />
 
-          {layers !== null && (
-            <>
-              <RoomShell backdrop={imageUrl} mood={mood} />
-              {layers.map((l, i) => (
-                <LdiLayerMesh key={i} layer={l} />
-              ))}
-            </>
-          )}
+          <RoomShell backdrop={imageUrl} mood={mood} />
+          {objectMeshes.map(({ obj, group, light }, i) => (
+            <group key={i}>
+              <primitive object={group} />
+              {light && <primitive object={light} position={[obj.pos[0], light.position.y, obj.pos[2]]} />}
+            </group>
+          ))}
 
           <RoomParticles />
           <RoomEffects mood={mood} />
@@ -385,7 +342,7 @@ export function RoomScene({
           ) : loaded ? (
             <>
               <span className="text-[11px] tracking-[0.25em] uppercase text-neutral-500">
-                room ready · {layers?.length ?? 0} depth layers
+                room ready · {objects.length} real objects
               </span>
               <span
                 className="text-[10px] tracking-[0.2em] uppercase"

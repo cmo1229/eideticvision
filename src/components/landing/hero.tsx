@@ -351,6 +351,7 @@ export function HeroSection() {
         )}
         <RoomScene
           imageUrl={roomImage}
+          prompt={lastPrompt}
           generating={generating}
           error={genError}
           onPromptExpand={handlePromptExpand}
