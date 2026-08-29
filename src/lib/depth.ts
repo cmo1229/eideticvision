@@ -18,7 +18,9 @@ async function getDepthPipeline(): Promise<any> {
         dtype: "fp32",
       })
     })()
-    pipelinePromise.catch(() => {
+    pipelinePromise.then(() => {
+      pipelineLoaded = true
+    }).catch(() => {
       // Allow retry on next call if load failed
       pipelinePromise = null
     })
@@ -148,3 +150,10 @@ export async function estimateDepth(
 export function preloadDepthModel() {
   getDepthPipeline().catch(() => {})
 }
+
+/* Is the model ready yet? (for progress UI) */
+export function depthModelReady(): boolean {
+  return pipelineLoaded
+}
+
+let pipelineLoaded = false

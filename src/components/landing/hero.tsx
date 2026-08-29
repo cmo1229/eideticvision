@@ -9,6 +9,7 @@ import { ImageScene } from "@/components/viewer/image-scene"
 import { WorldScene, type WorldViews } from "@/components/viewer/world-scene"
 import { ArchivePanel } from "@/components/landing/archive-panel"
 import { saveWorld, type ArchiveEntry } from "@/lib/archive"
+import { preloadDepthModel } from "@/lib/depth"
 import { MOODS, type MoodId } from "@/lib/moods"
 
 
@@ -231,6 +232,7 @@ export function HeroSection() {
     setAssetUrl(undefined)
 
     try {
+      preloadDepthModel()
       // 4-view surrounding 3D world — free, no keys
       const views = await imagineWorld(promptText)
       setWorldViews(views)
@@ -309,7 +311,7 @@ export function HeroSection() {
 
   if (worldViews) {
     return (
-      <section className="px-4 py-6 max-w-7xl mx-auto">
+      <section className="px-4 py-6 pt-20 max-w-7xl mx-auto">
         <button
           onClick={handleReturn}
           className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
@@ -335,7 +337,7 @@ export function HeroSection() {
 
   if (assetUrl && assetType === "image") {
     return (
-      <section className="px-4 py-6 max-w-7xl mx-auto">
+      <section className="px-4 py-6 pt-20 max-w-7xl mx-auto">
         <button
           onClick={handleReturn}
           className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
@@ -360,7 +362,7 @@ export function HeroSection() {
 
   if (assetUrl && assetType !== "image") {
     return (
-      <section className="px-4 py-6 max-w-7xl mx-auto">
+      <section className="px-4 py-6 pt-20 max-w-7xl mx-auto">
         <button
           onClick={handleReturn}
           className="text-xs text-neutral-600 hover:text-neutral-400 mb-6 uppercase tracking-[0.3em] transition-colors"
