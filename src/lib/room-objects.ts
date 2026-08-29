@@ -38,7 +38,9 @@ const KEYWORD_MAP: [RegExp, string][] = [
   [/chair|stool|seat/i, "chair"],
   [/bed|sleep|bedroom/i, "bed"],
   [/rug|carpet/i, "rug"],
-  [/plant|flower|garden|tree|forest/i, "plant"],
+  [/tree|forest|woods|woodland|grove|jungle/i, "tree"],
+  [/plant|flower|garden/i, "plant"],
+  [/rock|stone|mountain|cliff|canyon|boulder/i, "rock"],
   [/cabinet|dresser|drawer|wardrobe/i, "dresser"],
   [/window/i, "window"],
   [/fireplace|fire|hearth|cabin/i, "fireplace"],
@@ -48,29 +50,24 @@ const KEYWORD_MAP: [RegExp, string][] = [
   [/piano|music/i, "piano"],
 ]
 
+const OUTDOOR_RE = /forest|woods|woodland|grove|jungle|field|meadow|mountain|cliff|canyon|beach|ocean|sea|lake|river|garden|desert|snow|tundra|valley|hill|outdoor|outside|sky|storm|rain/i
+
 export function planRoom(prompt: string, objectCount = 9): PlannedObject[] {
   const rand = seededRandom(prompt.toLowerCase())
+  const outdoor = OUTDOOR_RE.test(prompt)
 
-  // Collect kinds from keywords (deduped, preserving order)
+  // Prompt-driven only: kinds come strictly from keywords
   const kinds: string[] = []
   for (const [re, kind] of KEYWORD_MAP) {
     if (re.test(prompt) && !kinds.includes(kind)) kinds.push(kind)
-  }
-  // Fill with ambient furniture so every room feels inhabited
-  const ambient = ["bookshelf", "table", "chair", "lamp", "rug", "plant", "dresser", "crate", "window"]
-  for (const k of ambient) {
-    if (kinds.length >= objectCount) break
-    if (!kinds.includes(k)) kinds.push(k)
   }
 
   const objects: PlannedObject[] = []
   const halfW = 9.5
   const halfD = 10.5
 
-  for (let i = 0; i < Math.min(kinds.length, objectCount); i++) {
-    const kind = kinds[i]
-    // Spread around the room, avoid dead-center spawn
-    const angle = (i / objectCount) * Math.PI * 2 + rand() * 0.8
+  const place = (kind: string, i: number, count: number) => {
+    const angle = (i / count) * Math.PI * 2 + rand() * 0.8
     const radius = 4.5 + rand() * 5
     let x = Math.cos(angle) * radius
     let z = Math.sin(angle) * radius
@@ -84,6 +81,32 @@ export function planRoom(prompt: string, objectCount = 9): PlannedObject[] {
       scale: 0.9 + rand() * 0.5,
     })
   }
+
+  if (kinds.length === 0) {
+    // Nothing matched — minimal, mood-neutral dressing so the room isn't empty
+    if (outdoor) {
+      for (let i = 0; i < 7; i++) place("tree", i, 7)
+      place("rock", 7, 8)
+    } else {
+      place("lamp", 0, 9)
+      place("rug", 1, 9)
+      place("crate", 2, 9)
+    }
+    return objects
+  }
+
+  // Spawn only what the prompt asked for; multiply counts for scene-scale kinds
+  const spread: string[] = []
+  if (outdoor && (kinds.includes("tree") || kinds.includes("rock"))) {
+    // Nature scenes read better with scattered multiples
+    const bulk = kinds.includes("tree") ? "tree" : "rock"
+    for (let i = 0; i < 8; i++) spread.push(bulk)
+    for (const k of kinds) if (k !== bulk && k !== "plant") spread.push(k)
+  } else {
+    for (const k of kinds) spread.push(k)
+  }
+
+  spread.slice(0, objectCount).forEach((kind, i) => place(kind, i, Math.min(spread.length, objectCount)))
 
   // Windows live on the walls
   const windows = objects.filter((o) => o.kind === "window")
@@ -301,6 +324,36 @@ export function buildObjectMesh(
       const keys = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.06, 0.32), mat("#d8d4e0", 0.5))
       keys.position.set(0, 1.45, 0.55)
       group.add(keys)
+      break
+    }
+    case "tree": {
+      const trunkH = 2.4 + Math.random() * 1.4
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.16, 0.24, trunkH, 8),
+        mat(mood === "noir" ? "#241f1c" : "#3d2f22", 0.9)
+      )
+      trunk.position.y = trunkH / 2
+      group.add(trunk)
+      const foliageColor = mood === "noir" ? "#1d2a22" : mood === "warm" ? "#44583a" : "#2c4438"
+      for (let i = 0; i < 3; i++) {
+        const cone = new THREE.Mesh(
+          new THREE.ConeGeometry(1.3 - i * 0.3, 1.6, 8),
+          mat(foliageColor, 0.95)
+        )
+        cone.position.y = trunkH * 0.8 + i * 0.85
+        group.add(cone)
+      }
+      break
+    }
+    case "rock": {
+      const geo = new THREE.DodecahedronGeometry(0.9 + Math.random() * 0.7, 0)
+      const rock = new THREE.Mesh(
+        geo,
+        mat(mood === "noir" ? "#232326" : mood === "warm" ? "#4a4238" : "#37344a", 0.95)
+      )
+      rock.position.y = 0.45
+      rock.rotation.set(Math.random(), Math.random(), Math.random())
+      group.add(rock)
       break
     }
     default: {
