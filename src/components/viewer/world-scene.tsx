@@ -7,6 +7,7 @@ import * as THREE from "three"
 import { getMood, type MoodId } from "@/lib/moods"
 import { PromptInput } from "@/components/ui/prompt-input"
 import { estimateDepth } from "@/lib/depth"
+import { NavHud, navInput } from "./nav-hud"
 import { startAmbience, stopAmbience } from "@/lib/ambience"
 
 /* ------------------------------------------------------------------ */
@@ -178,41 +179,69 @@ function FlightCamera({ active }: { active: boolean }) {
       lastMouse.current = { x: e.clientX, y: e.clientY }
     }
 
+    let touchId: number | null = null
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.changedTouches[0]
+      touchId = t.identifier
+      lastMouse.current = { x: t.clientX, y: t.clientY }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchId === null) return
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== touchId) continue
+        yaw.current -= (t.clientX - lastMouse.current.x) * 0.004
+        pitch.current -= (t.clientY - lastMouse.current.y) * 0.004
+        pitch.current = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch.current))
+        lastMouse.current = { x: t.clientX, y: t.clientY }
+      }
+    }
+    const onTouchEnd = () => (touchId = null)
+
     window.addEventListener("keydown", onKeyDown)
     window.addEventListener("keyup", onKeyUp)
     el.addEventListener("mousedown", onMouseDown)
     window.addEventListener("mouseup", onMouseUp)
     window.addEventListener("mousemove", onMouseMove)
+    el.addEventListener("touchstart", onTouchStart, { passive: true })
+    el.addEventListener("touchmove", onTouchMove, { passive: true })
+    el.addEventListener("touchend", onTouchEnd)
     return () => {
       window.removeEventListener("keydown", onKeyDown)
       window.removeEventListener("keyup", onKeyUp)
       el.removeEventListener("mousedown", onMouseDown)
       window.removeEventListener("mouseup", onMouseUp)
       window.removeEventListener("mousemove", onMouseMove)
+      el.removeEventListener("touchstart", onTouchStart)
+      el.removeEventListener("touchmove", onTouchMove)
+      el.removeEventListener("touchend", onTouchEnd)
     }
   }, [gl])
 
   useFrame((_, delta) => {
     if (!active) return
 
-    const boost = keys.current.has("shift") && keys.current.has("w") ? 2.5 : 1
-    const accel = 26 * boost * delta
-    const damping = Math.pow(0.12, delta)
-
+    const speed = 8 * delta
     const forward = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
     const right = new THREE.Vector3(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
-    const up = new THREE.Vector3(0, 1, 0)
 
-    if (keys.current.has("w")) velocity.current.add(forward.clone().multiplyScalar(accel))
-    if (keys.current.has("s")) velocity.current.add(forward.clone().multiplyScalar(-accel))
-    if (keys.current.has("a")) velocity.current.add(right.clone().multiplyScalar(-accel))
-    if (keys.current.has("d")) velocity.current.add(right.clone().multiplyScalar(accel))
-    if (keys.current.has(" ")) velocity.current.add(up.clone().multiplyScalar(accel))
-    if (keys.current.has("shift")) velocity.current.add(up.clone().multiplyScalar(-accel))
+    const fwd = keys.current.has("w") || navInput.forward
+    const back = keys.current.has("s") || navInput.back
+    const left = keys.current.has("a") || navInput.left
+    const rightIn = keys.current.has("d") || navInput.right
+    const up = keys.current.has(" ") || navInput.up
+    const down = keys.current.has("shift") || navInput.down
 
-    velocity.current.multiplyScalar(damping)
-
-    camera.position.add(velocity.current.clone().multiplyScalar(delta))
+    const move = new THREE.Vector3()
+    if (fwd) move.add(forward)
+    if (back) move.add(forward.clone().negate())
+    if (left) move.add(right.clone().negate())
+    if (rightIn) move.add(right)
+    if (up) move.y += 1
+    if (down) move.y -= 1
+    if (move.lengthSq() > 0) {
+      move.normalize().multiplyScalar(speed)
+      camera.position.add(move)
+    }
 
     // Keep within the world volume
     const limit = WALL_DIST - 3
@@ -449,6 +478,7 @@ export function WorldScene({
           </div>
         )}
 
+        <NavHud visible={loaded && !generating} />
         <Canvas
           camera={{ position: [0, 3, 0], fov: 70 }}
           style={{ background: "#030310" }}

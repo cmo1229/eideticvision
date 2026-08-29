@@ -8,6 +8,7 @@ import * as THREE from "three"
 import { getMood, type MoodId } from "@/lib/moods"
 import { PromptInput } from "@/components/ui/prompt-input"
 import { estimateDepth } from "@/lib/depth"
+import { NavHud, navInput } from "./nav-hud"
 import { startAmbience, stopAmbience } from "@/lib/ambience"
 
 /* ------------------------------------------------------------------ */
@@ -261,11 +262,32 @@ function FreeCamera({ active, intro }: { active: boolean; intro: boolean }) {
       lastMouse.current = { x: e.clientX, y: e.clientY }
     }
 
+    let touchId: number | null = null
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.changedTouches[0]
+      touchId = t.identifier
+      lastMouse.current = { x: t.clientX, y: t.clientY }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchId === null) return
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== touchId) continue
+        yaw.current -= (t.clientX - lastMouse.current.x) * 0.004
+        pitch.current -= (t.clientY - lastMouse.current.y) * 0.004
+        pitch.current = Math.max(-1.2, Math.min(1.2, pitch.current))
+        lastMouse.current = { x: t.clientX, y: t.clientY }
+      }
+    }
+    const onTouchEnd = () => (touchId = null)
+
     window.addEventListener("keydown", onKeyDown)
     window.addEventListener("keyup", onKeyUp)
     el.addEventListener("mousedown", onMouseDown)
     window.addEventListener("mouseup", onMouseUp)
     window.addEventListener("mousemove", onMouseMove)
+    el.addEventListener("touchstart", onTouchStart, { passive: true })
+    el.addEventListener("touchmove", onTouchMove, { passive: true })
+    el.addEventListener("touchend", onTouchEnd)
 
     return () => {
       window.removeEventListener("keydown", onKeyDown)
@@ -273,6 +295,9 @@ function FreeCamera({ active, intro }: { active: boolean; intro: boolean }) {
       el.removeEventListener("mousedown", onMouseDown)
       window.removeEventListener("mouseup", onMouseUp)
       window.removeEventListener("mousemove", onMouseMove)
+      el.removeEventListener("touchstart", onTouchStart)
+      el.removeEventListener("touchmove", onTouchMove)
+      el.removeEventListener("touchend", onTouchEnd)
     }
   }, [gl])
 
@@ -286,21 +311,27 @@ function FreeCamera({ active, intro }: { active: boolean; intro: boolean }) {
       if (introTime.current > 5) yaw.current = 0 // reset after intro
     }
 
-    const speed = 4 * delta
+    const speed = 6 * delta
     const forward = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
     const right = new THREE.Vector3(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
 
-    if (keys.current.has("w")) {
-      camera.position.add(forward.clone().multiplyScalar(speed))
-    }
-    if (keys.current.has("s")) {
-      camera.position.add(forward.clone().multiplyScalar(-speed))
-    }
-    if (keys.current.has("a")) {
-      camera.position.add(right.clone().multiplyScalar(-speed))
-    }
-    if (keys.current.has("d")) {
-      camera.position.add(right.clone().multiplyScalar(speed))
+    const fwd = keys.current.has("w") || navInput.forward
+    const back = keys.current.has("s") || navInput.back
+    const left = keys.current.has("a") || navInput.left
+    const rightIn = keys.current.has("d") || navInput.right
+    const up = keys.current.has(" ") || navInput.up
+    const down = keys.current.has("shift") || navInput.down
+
+    const move = new THREE.Vector3()
+    if (fwd) move.add(forward)
+    if (back) move.add(forward.clone().negate())
+    if (left) move.add(right.clone().negate())
+    if (rightIn) move.add(right)
+    if (up) move.y += 1
+    if (down) move.y -= 1
+    if (move.lengthSq() > 0) {
+      move.normalize().multiplyScalar(speed)
+      camera.position.add(move)
     }
 
     // Keep camera within terrain bounds, above ground
@@ -591,6 +622,7 @@ export function ImageScene({
           </div>
         )}
 
+        <NavHud visible={loaded && !generating} />
         <Canvas
           camera={{ position: [0, 2.5, 8], fov: 65 }}
           style={{ background: "#030305" }}

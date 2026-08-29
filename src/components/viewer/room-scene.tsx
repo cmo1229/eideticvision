@@ -8,6 +8,7 @@ import { getMood, type MoodId } from "@/lib/moods"
 import { buildLdi, type LdiLayer } from "@/lib/ldi"
 import { startAmbience, stopAmbience } from "@/lib/ambience"
 import { PromptInput } from "@/components/ui/prompt-input"
+import { NavHud, navInput } from "./nav-hud"
 
 /* ------------------------------------------------------------------ */
 /*  Room dimensions                                                     */
@@ -132,38 +133,70 @@ function RoomCamera({ active }: { active: boolean }) {
       pitch.current = Math.max(-1.2, Math.min(1.2, pitch.current))
       lastMouse.current = { x: e.clientX, y: e.clientY }
     }
+    let touchId: number | null = null
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.changedTouches[0]
+      touchId = t.identifier
+      lastMouse.current = { x: t.clientX, y: t.clientY }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchId === null) return
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== touchId) continue
+        yaw.current -= (t.clientX - lastMouse.current.x) * 0.004
+        pitch.current -= (t.clientY - lastMouse.current.y) * 0.004
+        pitch.current = Math.max(-1.2, Math.min(1.2, pitch.current))
+        lastMouse.current = { x: t.clientX, y: t.clientY }
+      }
+    }
+    const onTouchEnd = () => (touchId = null)
+
     window.addEventListener("keydown", onKeyDown)
     window.addEventListener("keyup", onKeyUp)
     el.addEventListener("mousedown", onMouseDown)
     window.addEventListener("mouseup", onMouseUp)
     window.addEventListener("mousemove", onMouseMove)
+    el.addEventListener("touchstart", onTouchStart, { passive: true })
+    el.addEventListener("touchmove", onTouchMove, { passive: true })
+    el.addEventListener("touchend", onTouchEnd)
     return () => {
       window.removeEventListener("keydown", onKeyDown)
       window.removeEventListener("keyup", onKeyUp)
       el.removeEventListener("mousedown", onMouseDown)
       window.removeEventListener("mouseup", onMouseUp)
       window.removeEventListener("mousemove", onMouseMove)
+      el.removeEventListener("touchstart", onTouchStart)
+      el.removeEventListener("touchmove", onTouchMove)
+      el.removeEventListener("touchend", onTouchEnd)
     }
   }, [gl])
 
   useFrame((_, delta) => {
     if (!active) return
 
-    const accel = 20 * delta
-    const damping = Math.pow(0.1, delta)
-
+    // Direct, responsive movement — keyboard or on-screen HUD
+    const speed = 7 * delta
     const forward = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
     const right = new THREE.Vector3(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
 
-    if (keys.current.has("w")) velocity.current.add(forward.clone().multiplyScalar(accel))
-    if (keys.current.has("s")) velocity.current.add(forward.clone().multiplyScalar(-accel))
-    if (keys.current.has("a")) velocity.current.add(right.clone().multiplyScalar(-accel))
-    if (keys.current.has("d")) velocity.current.add(right.clone().multiplyScalar(accel))
-    if (keys.current.has(" ")) velocity.current.y += accel
-    if (keys.current.has("shift")) velocity.current.y -= accel
+    const fwd = keys.current.has("w") || navInput.forward
+    const back = keys.current.has("s") || navInput.back
+    const left = keys.current.has("a") || navInput.left
+    const rightIn = keys.current.has("d") || navInput.right
+    const up = keys.current.has(" ") || navInput.up
+    const down = keys.current.has("shift") || navInput.down
 
-    velocity.current.multiplyScalar(damping)
-    camera.position.add(velocity.current.clone().multiplyScalar(delta))
+    const move = new THREE.Vector3()
+    if (fwd) move.add(forward)
+    if (back) move.add(forward.clone().negate())
+    if (left) move.add(right.clone().negate())
+    if (rightIn) move.add(right)
+    if (up) move.y += 1
+    if (down) move.y -= 1
+    if (move.lengthSq() > 0) {
+      move.normalize().multiplyScalar(speed)
+      camera.position.add(move)
+    }
 
     // Constrain inside the room
     const lim = ROOM_W / 2 - 1.5
@@ -317,6 +350,7 @@ export function RoomScene({
           </div>
         )}
 
+        <NavHud visible={loaded && !generating} />
         <Canvas
           camera={{ position: [0, 3, 8], fov: 65 }}
           style={{ background: "#06060f" }}
