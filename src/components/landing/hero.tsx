@@ -129,7 +129,9 @@ function VisualSteps() {
 export function HeroSection() {
   const [assetUrl, setAssetUrl] = useState<string | undefined>()
   const [assetType, setAssetType] = useState<string>("glb")
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [upgrading, setUpgrading] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
@@ -142,21 +144,6 @@ export function HeroSection() {
   const [activeMemoryIndex, setActiveMemoryIndex] = useState(0)
 
   useEffect(() => { setMounted(true) }, [])
-
-  const handleComplete = async (asset: UploadedAsset) => {
-    if (asset.type === "image") {
-      // No API needed: client-side depth pipeline handles everything
-      setAssetType("image")
-      setSourceType("image")
-      setGenError(null)
-      setMemoryStack([asset.url])
-      setActiveMemoryIndex(0)
-      setAssetUrl(asset.url)
-      return
-    }
-    setAssetType(asset.type)
-    setAssetUrl(asset.url)
-  }
 
   const imagine = async (promptText: string): Promise<string> => {
     const { data } = await axios.post(
@@ -172,21 +159,56 @@ export function HeroSection() {
     })
   }
 
+  // Fire Runway video generation; swaps into the viewer when ready
+  const upgradeToVideo = (params: Record<string, unknown>) => {
+    setUpgrading(true)
+    axios
+      .post("/api/generate", { mood, ...params }, { timeout: 280000 })
+      .then(({ data }) => {
+        if (data.videoUrls?.[0]) setVideoUrl(data.videoUrls[0])
+      })
+      .catch(() => {
+        // video upgrade is optional — image world stays
+      })
+      .finally(() => setUpgrading(false))
+  }
+
+  const handleComplete = async (asset: UploadedAsset) => {
+    if (asset.type === "image") {
+      // Instant world from client-side depth; Runway adds living video after
+      setAssetType("image")
+      setSourceType("image")
+      setGenError(null)
+      setVideoUrl(null)
+      setMemoryStack([asset.url])
+      setActiveMemoryIndex(0)
+      setAssetUrl(asset.url)
+      upgradeToVideo({ imageUrl: asset.url })
+      return
+    }
+    setAssetType(asset.type)
+    setAssetUrl(asset.url)
+  }
+
   const handlePrompt = async (promptText: string) => {
     setAssetType("image")
     setSourceType("text")
     setGenerating(true)
     setGenError(null)
     setMemoryStack([])
+    setVideoUrl(null)
 
     try {
+      // Fast path: Pollinations image → world appears in seconds
       const imageUrl = await imagine(promptText)
       setAssetUrl(imageUrl)
       setMemoryStack([imageUrl])
       setActiveMemoryIndex(0)
+      setGenerating(false)
+      // Slow path: Runway video swaps in when ready
+      upgradeToVideo({ promptText })
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
-    } finally {
       setGenerating(false)
     }
   }
@@ -201,15 +223,18 @@ export function HeroSection() {
       setMemoryStack(newStack)
       setActiveMemoryIndex(newStack.length - 1)
       setAssetUrl(imageUrl)
+      setVideoUrl(null)
+      setGenerating(false)
+      upgradeToVideo({ promptText })
     } catch (err: any) {
       setGenError(err.response?.data?.error ?? err.message ?? "Generation failed")
-    } finally {
       setGenerating(false)
     }
   }
 
   const handleReturn = () => {
     setAssetUrl(undefined)
+    setVideoUrl(null)
     setMemoryStack([])
     setActiveMemoryIndex(0)
     setGenError(null)
@@ -226,6 +251,7 @@ export function HeroSection() {
         </button>
         <ImageScene
           imageUrl={memoryStack[activeMemoryIndex] ?? assetUrl}
+          videoUrl={videoUrl}
           generating={generating}
           error={genError}
           onPromptExpand={handlePromptExpand}
@@ -362,6 +388,23 @@ export function HeroSection() {
           ))}
         </div>
       </div>
+
+      {/* Generating overlay for prompt flow */}
+      {generating && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="max-w-sm w-full px-8">
+            <p className="text-[11px] tracking-[0.3em] uppercase text-violet-400/80 text-center mb-6 animate-pulse">
+              imagining the memory
+            </p>
+            <div className="relative w-full h-[1px] bg-neutral-800/60 overflow-visible">
+              <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-violet-500 to-transparent animate-[shimmer_1.6s_ease-in-out_infinite]" style={{ left: "35%" }} />
+            </div>
+            <p className="text-[10px] tracking-[0.2em] uppercase text-neutral-600 text-center mt-4">
+              this takes a few seconds
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Scroll indicator */}
       <div className="absolute bottom-6 inset-x-0 z-10 flex items-center justify-center gap-2">

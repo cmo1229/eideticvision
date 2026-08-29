@@ -557,6 +557,7 @@ function GenerationOverlay() {
 
 interface ImageSceneProps {
   imageUrl: string
+  videoUrl?: string | null
   depthUrl?: string | null
   generating: boolean
   error: string | null
@@ -570,6 +571,7 @@ interface ImageSceneProps {
 
 export function ImageScene({
   imageUrl,
+  videoUrl,
   depthUrl,
   generating,
   error,
@@ -661,6 +663,7 @@ export function ImageScene({
 
           <DepthMesh
             imageUrl={imageUrl}
+            videoUrl={videoUrl}
             sourceType={sourceType}
             onLoad={() => setLoaded(true)}
           />

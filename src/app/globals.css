@@ -26,3 +26,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes shimmer {
+  0% { transform: translateX(-80px); opacity: 0.2; }
+  50% { opacity: 1; }
+  100% { transform: translateX(80px); opacity: 0.2; }
+}
