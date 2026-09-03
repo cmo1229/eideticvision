@@ -26,13 +26,13 @@ export default function PlacesPage() {
 
       <section className="max-w-5xl mx-auto px-6 pt-32 pb-24">
         <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">your places</p>
-        <h1 className="mt-4 text-2xl font-extralight text-neutral-300 tracking-wide">
+        <h1 className="mt-4 text-2xl font-extralight text-neutral-100 tracking-wide">
           The spatial history of your life.
         </h1>
 
         {mounted && places.length === 0 && (
           <div className="mt-16 border border-dashed border-neutral-800/60 p-16 text-center">
-            <p className="text-sm text-neutral-500 font-light">
+            <p className="text-sm text-neutral-400 font-light">
               No places yet. The first one is usually a house you can&apos;t go back to.
             </p>
             <a
@@ -72,11 +72,11 @@ export default function PlacesPage() {
                 <div className="absolute inset-0 bg-gradient-to-t from-[#030305] via-transparent to-transparent" />
               </div>
               <div className="p-5">
-                <h3 className="text-sm text-neutral-300 font-light">{p.name}</h3>
-                <p className="mt-1 text-[10px] tracking-[0.25em] uppercase text-neutral-600">
+                <h3 className="text-sm text-neutral-200 font-light">{p.name}</h3>
+                <p className="mt-1 text-[10px] tracking-[0.25em] uppercase text-neutral-500">
                   {p.startYear}–{p.endYear}
                 </p>
-                <p className="mt-3 text-[10px] tracking-[0.2em] uppercase text-neutral-700">
+                <p className="mt-3 text-[10px] tracking-[0.2em] uppercase text-neutral-500">
                   {p.contributors.length} contributor{p.contributors.length !== 1 ? "s" : ""} ·{" "}
                   {pinCounts[p.id] ?? 0} memories
                 </p>

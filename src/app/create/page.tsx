@@ -59,8 +59,8 @@ export default function CreatePage() {
   }
 
   const inputCls =
-    "w-full bg-transparent border-b border-neutral-800/60 px-1 py-2.5 text-sm text-neutral-300 placeholder:text-neutral-700 focus:outline-none focus:border-violet-500/40 transition-colors"
-  const labelCls = "text-[10px] tracking-[0.3em] uppercase text-neutral-600"
+    "w-full bg-transparent border-b border-neutral-800/60 px-1 py-2.5 text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none focus:border-violet-500/40 transition-colors"
+  const labelCls = "text-[10px] tracking-[0.3em] uppercase text-neutral-500"
 
   return (
     <main className="min-h-screen bg-[#030305] text-neutral-200 selection:bg-violet-500/30">
@@ -71,7 +71,7 @@ export default function CreatePage() {
 
       <section className="relative max-w-xl mx-auto px-6 pt-32 pb-24">
         <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">new place</p>
-        <h1 className="mt-4 text-2xl font-extralight text-neutral-300 tracking-wide">
+        <h1 className="mt-4 text-2xl font-extralight text-neutral-100 tracking-wide">
           Name the place. Everything else follows.
         </h1>
 
@@ -135,7 +135,7 @@ export default function CreatePage() {
                   <img src={cover} alt="cover" className="w-full h-full object-cover" />
                 </div>
               ) : (
-                <span className="text-xs text-neutral-600">add a photo of the place…</span>
+                <span className="text-xs text-neutral-400">add a photo of the place…</span>
               )}
             </button>
             <input
@@ -158,7 +158,7 @@ export default function CreatePage() {
                   ✓ {splatFile.name} ({(splatFile.size / 1024 / 1024).toFixed(1)} MB)
                 </span>
               ) : (
-                <span className="text-xs text-neutral-600">
+                <span className="text-xs text-neutral-400">
                   Drop in a .ply / .splat captured with Scaniverse or another app — or skip it and
                   add one later. The archive works without it.
                 </span>
@@ -189,7 +189,7 @@ export default function CreatePage() {
             {saving ? "creating the place…" : "create the place"}
           </button>
 
-          <p className="text-[10px] text-neutral-700 leading-relaxed">
+          <p className="text-[10px] text-neutral-500 leading-relaxed">
             Private by default. Everything stays on this device until sharing is set up.
           </p>
         </div>

@@ -45,10 +45,10 @@ export default function PreservePage() {
 
       <section className="max-w-3xl mx-auto px-6 pt-32 pb-16">
         <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">capture guide</p>
-        <h1 className="mt-4 text-3xl font-extralight text-neutral-300 tracking-wide leading-tight">
+        <h1 className="mt-4 text-3xl font-extralight text-neutral-100 tracking-wide leading-tight">
           A phone is all it takes.
         </h1>
-        <p className="mt-6 text-sm text-neutral-500 leading-relaxed font-light">
+        <p className="mt-6 text-sm text-neutral-400 leading-relaxed font-light">
           Ten slow minutes with a free app preserves a place forever. Walk the rooms like
           you&apos;re showing them to someone you love — that&apos;s the whole technique.
         </p>
@@ -64,9 +64,9 @@ export default function PreservePage() {
                   {g.free === true ? "free" : g.free}
                 </span>
               </div>
-              <ol className="mt-5 space-y-2">
+              <ol className="mt-5 space-y-2.5">
                 {g.steps.map((s, i) => (
-                  <li key={i} className="flex gap-3 text-xs text-neutral-500 leading-relaxed">
+                  <li key={i} className="flex gap-3 text-xs text-neutral-400 leading-relaxed">
                     <span className="text-violet-500/50 shrink-0">→</span>
                     {s}
                   </li>
@@ -85,7 +85,7 @@ export default function PreservePage() {
         </div>
       </section>
 
-      <section className="max-w-3xl mx-auto px-6 pb-40">
+      <section id="service" className="max-w-3xl mx-auto px-6 pb-40">
         <div className="border border-neutral-800/40 p-10">
           <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">
             professional place preservation
@@ -93,7 +93,7 @@ export default function PreservePage() {
           <h2 className="mt-4 text-xl font-extralight text-neutral-300">
             Selling the house tomorrow isn&apos;t the moment to learn new software.
           </h2>
-          <p className="mt-5 text-sm text-neutral-500 leading-relaxed font-light">
+          <p className="mt-5 text-sm text-neutral-400 leading-relaxed font-light">
             For places that can&apos;t wait — a family home on the market, an estate transition, a
             last visit — we handle everything. A professional capture of the entire property,
             cleaned and prepared. We set up the archive, import the family photos, and walk your
