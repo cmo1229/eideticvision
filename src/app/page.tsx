@@ -73,7 +73,7 @@ export default function Page() {
           }}
         >
           <h1 className="text-4xl md:text-6xl font-extralight tracking-[-0.02em] leading-[1.05]">
-            <span className="text-neutral-200">Keep the places you</span>
+            <span className="text-neutral-100 font-light">Keep the places you</span>
             <br />
             <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent font-light">
               can&apos;t keep forever.
@@ -121,10 +121,15 @@ export default function Page() {
 
       {/* How it works */}
       <section id="how" className="max-w-5xl mx-auto px-6 py-28">
-        <div className="flex items-center gap-4 mb-16">
-          <span className="block h-[1px] flex-1 bg-neutral-800/40" />
-          <span className="block w-1 h-1 rounded-full bg-neutral-800" />
-          <span className="block h-[1px] flex-1 bg-neutral-800/40" />
+        <div className="text-center mb-20">
+          <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-500">how it works</p>
+          <h2 className="mt-5 text-2xl md:text-3xl font-extralight tracking-[-0.01em] leading-snug text-neutral-200">
+            A place becomes a{" "}
+            <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent">
+              memory
+            </span>{" "}
+            in three quiet steps.
+          </h2>
         </div>
 
         <div className="flex flex-col md:flex-row gap-0">
@@ -138,9 +143,9 @@ export default function Page() {
                 transition: `all 0.9s cubic-bezier(0.16, 1, 0.3, 1) ${i * 200}ms`,
               }}
             >
-              <span className="text-[10px] tracking-[0.3em] uppercase text-violet-400/70">{s.n}</span>
-              <h3 className="mt-5 text-sm tracking-[0.15em] uppercase text-neutral-200">{s.title}</h3>
-              <p className="mt-4 text-xs leading-relaxed text-neutral-400">{s.body}</p>
+              <span className="text-sm font-extralight tracking-[0.2em] text-violet-300/80">{s.n}</span>
+              <h3 className="mt-5 text-[13px] font-light tracking-[0.2em] uppercase text-neutral-100">{s.title}</h3>
+              <p className="mt-4 text-[13px] font-light leading-loose text-neutral-400">{s.body}</p>
             </div>
           ))}
         </div>
@@ -148,12 +153,14 @@ export default function Page() {
 
       {/* Closing */}
       <section className="max-w-2xl mx-auto px-6 pb-40 text-center">
-        <p className="text-lg font-light text-neutral-300 leading-relaxed">
+        <p className="text-xl font-extralight text-neutral-200 leading-loose">
           Every place holds its people.
           <br />
           Every person holds their memories.
           <br />
-          Nothing should be lost just because the house is gone.
+          <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent">
+            Nothing should be lost just because the house is gone.
+          </span>
         </p>
         <div className="mt-12 flex items-center justify-center gap-3">
           <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-500">space</span>

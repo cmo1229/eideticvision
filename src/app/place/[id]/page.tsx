@@ -5,11 +5,12 @@ import { useParams, useRouter } from "next/navigation"
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import { PLYLoader } from "three-stdlib"
+import { parseSplatFile, ensurePlyColors } from "@/lib/splat"
 import * as THREE from "three"
 import { Nav } from "@/components/landing/atmosphere"
 import {
   getPlace,
-  getSplatUrl,
+  getSplatBlob,
   loadPins,
   savePin,
   deletePin,
@@ -60,11 +61,13 @@ function makeDemoGeometry(): THREE.BufferGeometry {
 }
 
 function SplatPoints({
-  url,
+  blob,
+  splatName,
   onPick,
   isEmpty,
 }: {
-  url: string | null
+  blob: Blob | null
+  splatName?: string
   onPick: (p: [number, number, number]) => void
   isEmpty: boolean
 }) {
@@ -81,27 +84,48 @@ function SplatPoints({
       setGeometry(makeDemoGeometry())
       return
     }
-    if (!url) return
+    if (!blob) return
     setError(null)
-    new PLYLoader().load(
-      url,
-      (geo) => {
-        if (!geo.attributes.color) {
-          // colorize uniformly if the splat has no vertex colors
-          const n = geo.attributes.position.count
-          const colors = new Float32Array(n * 3).fill(0.75)
-          geo.setAttribute("color", new THREE.BufferAttribute(colors, 3))
+    let cancelled = false
+
+    const isSplatFormat = splatName?.toLowerCase().endsWith(".splat")
+
+    ;(async () => {
+      try {
+        if (isSplatFormat) {
+          const buf = await blob.arrayBuffer()
+          if (cancelled) return
+          setGeometry(parseSplatFile(buf))
+        } else {
+          const url = URL.createObjectURL(blob)
+          new PLYLoader().load(
+            url,
+            (geo) => {
+              URL.revokeObjectURL(url)
+              if (cancelled) return
+              ensurePlyColors(geo)
+              geo.computeBoundingBox()
+              const center = new THREE.Vector3()
+              geo.boundingBox!.getCenter(center)
+              geo.translate(-center.x, -center.y, -center.z)
+              setGeometry(geo)
+            },
+            undefined,
+            () => {
+              URL.revokeObjectURL(url)
+              if (!cancelled) setError("could not read this splat file — try exporting as .ply from SuperSplat")
+            }
+          )
         }
-        geo.computeBoundingBox()
-        const center = new THREE.Vector3()
-        geo.boundingBox!.getCenter(center)
-        geo.translate(-center.x, -center.y, -center.z)
-        setGeometry(geo)
-      },
-      undefined,
-      () => setError("could not read this splat file — try exporting as .ply from SuperSplat")
-    )
-  }, [url, isEmpty])
+      } catch {
+        if (!cancelled) setError("could not read this splat file")
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [blob, splatName, isEmpty])
 
   if (error) return <p className="text-red-400/70 text-xs p-8">{error}</p>
   if (!geometry) return null
@@ -316,7 +340,7 @@ export default function PlacePage() {
   const placeId = params.id as string
 
   const [place, setPlace] = useState<Place | null>(null)
-  const [splatUrl, setSplatUrl] = useState<string | null>(null)
+  const [splatBlob, setSplatBlob] = useState<Blob | null>(null)
   const [pins, setPins] = useState<MemoryPin[]>([])
   const [picking, setPicking] = useState<[number, number, number] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -332,8 +356,8 @@ export default function PlacePage() {
     }
     setPlace(p)
     setPins(loadPins(placeId))
-    getSplatUrl(placeId).then((url) => {
-      setSplatUrl(url)
+    getSplatBlob(placeId).then((b) => {
+      setSplatBlob(b)
       setLoaded(true)
     })
   }, [placeId, router])
@@ -444,8 +468,9 @@ export default function PlacePage() {
               <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#030305" }}>
                 <ambientLight intensity={0.7} />
                 <SplatPoints
-                  url={splatUrl}
-                  isEmpty={!splatUrl && loaded}
+                  blob={splatBlob}
+                  splatName={place.splatName}
+                  isEmpty={!splatBlob && loaded}
                   onPick={(p) => {
                     setPicking(p)
                     setSelected(null)

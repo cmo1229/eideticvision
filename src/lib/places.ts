@@ -123,6 +123,20 @@ export async function storeSplat(placeId: string, file: Blob): Promise<void> {
   })
 }
 
+export async function getSplatBlob(placeId: string): Promise<Blob | null> {
+  try {
+    const db = await openDb()
+    return new Promise((resolve) => {
+      const tx = db.transaction(SPLAT_STORE, "readonly")
+      const req = tx.objectStore(SPLAT_STORE).get(placeId)
+      req.onsuccess = () => resolve((req.result as Blob) ?? null)
+      req.onerror = () => resolve(null)
+    })
+  } catch {
+    return null
+  }
+}
+
 export async function getSplatUrl(placeId: string): Promise<string | null> {
   try {
     const db = await openDb()
