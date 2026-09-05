@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Nav, NoiseOverlay } from "@/components/landing/atmosphere"
 import { savePlace, storeSplat, fileToDataUrl, type Place } from "@/lib/places"
+import { buildSpzFromPrompt } from "@/lib/text-to-splat"
 
 export default function CreatePage() {
   const router = useRouter()
@@ -15,6 +16,13 @@ export default function CreatePage() {
   const [splatFile, setSplatFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Generative place — no scan needed
+  const [dreamPrompt, setDreamPrompt] = useState("")
+  const [dreaming, setDreaming] = useState(false)
+  const [dreamPhase, setDreamPhase] = useState("")
+  const [dreamBlob, setDreamBlob] = useState<Blob | null>(null)
+  const [dreamPointCount, setDreamPointCount] = useState(0)
   const coverRef = useRef<HTMLInputElement>(null)
   const splatRef = useRef<HTMLInputElement>(null)
 
@@ -27,6 +35,29 @@ export default function CreatePage() {
     } catch {}
   }
 
+  const handleDream = async () => {
+    if (!dreamPrompt.trim()) return
+    setDreaming(true)
+    setError(null)
+    try {
+      const mood = "lucid"
+      const { blob, pointCount } = await buildSpzFromPrompt(dreamPrompt.trim(), mood, {
+        onPhase: setDreamPhase,
+      })
+      setDreamBlob(blob)
+      setDreamPointCount(pointCount)
+      if (!name.trim()) {
+        // Derive a place name from the prompt
+        setName(dreamPrompt.trim().slice(0, 60))
+      }
+      if (!description.trim()) setDescription(dreamPrompt.trim())
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "the imagining failed — try again")
+    } finally {
+      setDreaming(false)
+      }
+  }
+
   const handleCreate = async () => {
     if (!name.trim()) {
       setError("give the place a name")
@@ -35,6 +66,8 @@ export default function CreatePage() {
     setSaving(true)
     setError(null)
     try {
+      const finalSplat = dreamBlob ?? splatFile
+      const finalName = dreamBlob ? "generated-place.spz" : splatFile?.name
       const place: Place = {
         id: crypto.randomUUID(),
         name: name.trim(),
@@ -42,14 +75,14 @@ export default function CreatePage() {
         endYear: Math.max(startYear, endYear),
         description: description.trim(),
         cover,
-        hasSplat: !!splatFile,
-        splatName: splatFile?.name,
+        hasSplat: !!finalSplat,
+        splatName: finalName,
         createdAt: Date.now(),
         contributors: ["you"],
       }
       savePlace(place)
-      if (splatFile) {
-        await storeSplat(place.id, splatFile)
+      if (finalSplat) {
+        await storeSplat(place.id, finalSplat)
       }
       router.push(`/place/${place.id}`)
     } catch (e: unknown) {
@@ -145,6 +178,51 @@ export default function CreatePage() {
               className="hidden"
               onChange={(e) => handleCover(e.target.files?.[0])}
             />
+          </div>
+
+          {/* OR divider */}
+          <div className="flex items-center gap-3 pt-2">
+            <span className="block h-[1px] flex-1 bg-neutral-800/50" />
+            <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">or imagine it</span>
+            <span className="block h-[1px] flex-1 bg-neutral-800/50" />
+          </div>
+
+          {/* Generative place — no scan needed */}
+          <div>
+            <label className={labelCls}>describe the place — ai builds the splat</label>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={dreamPrompt}
+                onChange={(e) => setDreamPrompt(e.target.value)}
+                placeholder="the kitchen with the yellow wallpaper and the radio on the counter…"
+                className={`${inputCls} flex-1`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !dreaming) handleDream()
+                }}
+              />
+              <button
+                onClick={handleDream}
+                disabled={dreaming || !dreamPrompt.trim()}
+                className={`shrink-0 px-5 text-[10px] tracking-[0.25em] uppercase border transition-all ${
+                  dreaming
+                    ? "border-violet-500/30 text-violet-400/60 cursor-wait"
+                    : "border-violet-500/40 text-violet-200 hover:bg-violet-500/[0.1]"
+                }`}
+              >
+                {dreaming ? "···" : "build"}
+              </button>
+            </div>
+            {dreaming && (
+              <p className="mt-3 text-[10px] tracking-[0.25em] uppercase text-violet-400/70 animate-pulse">
+                {dreamPhase} · this takes about twenty seconds
+              </p>
+            )}
+            {dreamBlob && (
+              <p className="mt-3 text-[11px] text-violet-300/80">
+                ✓ splat built — {dreamPointCount.toLocaleString()} points. It will render when you
+                open the place.
+              </p>
+            )}
           </div>
 
           <div>
