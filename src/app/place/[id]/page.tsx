@@ -8,6 +8,7 @@ import { PLYLoader } from "three-stdlib"
 import { parseSplatFile, ensurePlyColors, parseSpzFile, splatKind } from "@/lib/splat"
 import * as THREE from "three"
 import { Nav } from "@/components/landing/atmosphere"
+import { RetentionBar } from "@/components/ui/progress"
 import { MOODS, getMood, type MoodId } from "@/lib/moods"
 import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import {
@@ -542,11 +543,11 @@ export default function PlacePage() {
           <div className="flex-1 min-w-0">
             <div className="relative w-full h-[68vh] border border-neutral-800/30 bg-[#030305] overflow-hidden">
               {!loaded && (
-                <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/80">
-                  <p className="text-xs tracking-[0.3em] uppercase text-violet-400/70 animate-pulse">
-                    opening the place…
-                  </p>
-                </div>
+                <RetentionBar
+                  phase="opening the place"
+                  subtext={place.hasSplat ? "unpacking the scan" : undefined}
+                  estimatedMs={place.hasSplat ? 12000 : 3000}
+                />
               )}
 
               <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#030305" }}>

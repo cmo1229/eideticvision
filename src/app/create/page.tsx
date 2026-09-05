@@ -3,6 +3,7 @@
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Nav, NoiseOverlay } from "@/components/landing/atmosphere"
+import { RetentionBar } from "@/components/ui/progress"
 import { savePlace, storeSplat, fileToDataUrl, type Place } from "@/lib/places"
 import { buildSpzFromPrompt } from "@/lib/text-to-splat"
 
@@ -101,6 +102,16 @@ export default function CreatePage() {
       <div className="absolute inset-0 pointer-events-none opacity-30">
         <NoiseOverlay />
       </div>
+
+      {dreaming && (
+        <div className="fixed inset-0 z-40">
+          <RetentionBar
+            phase={dreamPhase || "imagining the place"}
+            subtext="this usually takes about twenty seconds"
+            estimatedMs={22000}
+          />
+        </div>
+      )}
 
       <section className="relative max-w-xl mx-auto px-6 pt-32 pb-24">
         <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">new place</p>
@@ -212,11 +223,6 @@ export default function CreatePage() {
                 {dreaming ? "···" : "build"}
               </button>
             </div>
-            {dreaming && (
-              <p className="mt-3 text-[10px] tracking-[0.25em] uppercase text-violet-400/70 animate-pulse">
-                {dreamPhase} · this takes about twenty seconds
-              </p>
-            )}
             {dreamBlob && (
               <p className="mt-3 text-[11px] text-violet-300/80">
                 ✓ splat built — {dreamPointCount.toLocaleString()} points. It will render when you
