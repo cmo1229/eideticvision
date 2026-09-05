@@ -70,3 +70,46 @@ export function ensurePlyColors(geo: THREE.BufferGeometry): THREE.BufferGeometry
   }
   return geo
 }
+
+/**
+ * Decode Niantic SPZ (Scaniverse default export) via WASM.
+ * Returns a colored point-cloud geometry.
+ */
+export async function parseSpzFile(buffer: ArrayBuffer): Promise<THREE.BufferGeometry> {
+  const { loadSpz } = await import("@spz-loader/core")
+  const cloud = await loadSpz(new Uint8Array(buffer))
+
+  const n = cloud.numPoints
+  const positions = new Float32Array(n * 3)
+  const colors = new Float32Array(n * 3)
+
+  for (let i = 0; i < n; i++) {
+    positions[i * 3] = cloud.positions[i * 3]
+    positions[i * 3 + 1] = cloud.positions[i * 3 + 1]
+    positions[i * 3 + 2] = cloud.positions[i * 3 + 2]
+
+    const alpha = cloud.alphas[i] / 255
+    // fade nearly-transparent splats toward the background
+    const a = Math.max(0.05, Math.min(1, alpha))
+    colors[i * 3] = cloud.colors[i * 3] * a
+    colors[i * 3 + 1] = cloud.colors[i * 3 + 1] * a
+    colors[i * 3 + 2] = cloud.colors[i * 3 + 2] * a
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3))
+  geo.computeBoundingBox()
+  const center = new THREE.Vector3()
+  geo.boundingBox!.getCenter(center)
+  geo.translate(-center.x, -center.y, -center.z)
+  return geo
+}
+
+export function splatKind(fileName?: string): "spz" | "splat" | "ply" | "unknown" {
+  const name = fileName?.toLowerCase() ?? ""
+  if (name.endsWith(".spz")) return "spz"
+  if (name.endsWith(".splat")) return "splat"
+  if (name.endsWith(".ply")) return "ply"
+  return "unknown"
+}

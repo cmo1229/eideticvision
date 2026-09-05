@@ -159,7 +159,7 @@ export default function CreatePage() {
                 </span>
               ) : (
                 <span className="text-xs text-neutral-400">
-                  Drop in a .ply / .splat captured with Scaniverse or another app — or skip it and
+                  Drop in a .spz / .ply / .splat captured with Scaniverse or another app — or skip it and
                   add one later. The archive works without it.
                 </span>
               )}
@@ -167,7 +167,7 @@ export default function CreatePage() {
             <input
               ref={splatRef}
               type="file"
-              accept=".ply,.splat"
+              accept=".ply,.splat,.spz"
               className="hidden"
               onChange={(e) => setSplatFile(e.target.files?.[0] ?? null)}
             />

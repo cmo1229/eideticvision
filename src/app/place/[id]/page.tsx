@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import { PLYLoader } from "three-stdlib"
-import { parseSplatFile, ensurePlyColors } from "@/lib/splat"
+import { parseSplatFile, ensurePlyColors, parseSpzFile, splatKind } from "@/lib/splat"
 import * as THREE from "three"
 import { Nav } from "@/components/landing/atmosphere"
 import {
@@ -88,11 +88,15 @@ function SplatPoints({
     setError(null)
     let cancelled = false
 
-    const isSplatFormat = splatName?.toLowerCase().endsWith(".splat")
+    const kind = splatKind(splatName)
 
     ;(async () => {
       try {
-        if (isSplatFormat) {
+        if (kind === "spz") {
+          const buf = await blob.arrayBuffer()
+          if (cancelled) return
+          setGeometry(await parseSpzFile(buf))
+        } else if (kind === "splat") {
           const buf = await blob.arrayBuffer()
           if (cancelled) return
           setGeometry(parseSplatFile(buf))
