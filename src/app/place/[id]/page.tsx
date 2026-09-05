@@ -8,6 +8,8 @@ import { PLYLoader } from "three-stdlib"
 import { parseSplatFile, ensurePlyColors, parseSpzFile, splatKind } from "@/lib/splat"
 import * as THREE from "three"
 import { Nav } from "@/components/landing/atmosphere"
+import { MOODS, getMood, type MoodId } from "@/lib/moods"
+import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import {
   getPlace,
   getSplatBlob,
@@ -133,9 +135,37 @@ function SplatPoints({
 
   if (error) return <p className="text-red-400/70 text-xs p-8">{error}</p>
   if (!geometry) return null
+  return <LiveCloud geometry={geometry} onPick={onPick} />
+}
+
+/* ------------------------------------------------------------------ */
+/*  LiveCloud — styling, motion, tour                                   */
+/* ------------------------------------------------------------------ */
+
+function LiveCloud({
+  geometry,
+  onPick,
+}: {
+  geometry: THREE.BufferGeometry
+  onPick: (p: [number, number, number]) => void
+}) {
+  const ref = useRef<THREE.Points>(null!)
+  const basePositions = useMemo(
+    () => (geometry.attributes.position.array as Float32Array).slice(),
+    [geometry]
+  )
+
+  // Ambient motion: the memory breathes — gentle organic sway
+  useFrame(() => {
+    if (!ref.current) return
+    const t = Date.now() * 0.0004
+    ref.current.rotation.z = Math.sin(t) * 0.0016
+    ref.current.position.y = Math.sin(t * 1.3) * 0.014
+  })
 
   return (
     <points
+      ref={ref}
       geometry={geometry}
       onClick={(e) => {
         e.stopPropagation()
@@ -144,6 +174,54 @@ function SplatPoints({
     >
       <pointsMaterial size={0.02} vertexColors sizeAttenuation />
     </points>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  TourCamera — cinematic guided float through the place               */
+/* ------------------------------------------------------------------ */
+
+function TourCamera({ active, radius }: { active: boolean; radius: number }) {
+  const { camera } = useThree()
+  const t = useRef(0)
+
+  useFrame((_, delta) => {
+    if (!active) return
+    t.current += delta * 0.14
+    const time = t.current
+    const r = radius
+    // Slow orbit with vertical breathing and gentle look drift
+    const x = Math.sin(time) * r
+    const z = Math.cos(time) * r
+    const y = 1.4 + Math.sin(time * 0.45) * 0.9
+    camera.position.lerp(new THREE.Vector3(x, y, z), 0.02)
+    camera.lookAt(
+      Math.sin(time * 0.6) * r * 0.12,
+      1.1 + Math.sin(time * 0.3) * 0.35,
+      Math.cos(time * 0.35) * 0.4
+    )
+  })
+
+  return null
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mood post-processing over the splat                                 */
+/* ------------------------------------------------------------------ */
+
+function PlaceEffects({ mood }: { mood: MoodId }) {
+  const m = getMood(mood)
+  return (
+    <EffectComposer enableNormalPass={false} multisampling={0}>
+      <Bloom
+        luminanceThreshold={m.bloom.threshold}
+        luminanceSmoothing={m.bloom.smoothing}
+        intensity={m.bloom.intensity * 0.7}
+        width={480}
+      />
+      <HueSaturation hue={m.hue} saturation={m.saturation} />
+      <Vignette offset={m.vignette.offset} darkness={m.vignette.darkness} />
+    </EffectComposer>
   )
 }
 
@@ -350,6 +428,8 @@ export default function PlacePage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [mood, setMood] = useState<MoodId>("lucid")
+  const [touring, setTouring] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -476,6 +556,7 @@ export default function PlacePage() {
                   splatName={place.splatName}
                   isEmpty={!splatBlob && loaded}
                   onPick={(p) => {
+                    if (touring) return
                     setPicking(p)
                     setSelected(null)
                   }}
@@ -486,13 +567,44 @@ export default function PlacePage() {
                     pin={pin}
                     active={selected === pin.id}
                     onSelect={() => {
+                      if (touring) return
                       setSelected(pin.id === selected ? null : pin.id)
                       setPicking(null)
                     }}
                   />
                 ))}
-                <OrbitControls makeDefault enablePan enableZoom minDistance={0.5} maxDistance={30} />
+                <PlaceEffects mood={mood} />
+                <TourCamera active={touring} radius={5} />
+                <OrbitControls makeDefault enablePan={!touring} enableZoom={!touring} enabled={!touring} minDistance={0.5} maxDistance={30} />
               </Canvas>
+
+              {/* Live feel + tour bar */}
+              <div className="absolute top-3 left-3 flex items-center gap-1 z-10">
+                {MOODS.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMood(m.id)}
+                    className={`px-2.5 py-1 text-[9px] tracking-[0.2em] uppercase backdrop-blur-sm border transition-all ${
+                      mood === m.id
+                        ? "border-violet-400/60 text-violet-200 bg-black/60"
+                        : "border-transparent text-neutral-600 hover:text-neutral-300 bg-black/30"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setTouring((v) => !v)}
+                className={`absolute top-3 right-3 z-10 px-4 py-1.5 text-[9px] tracking-[0.25em] uppercase backdrop-blur-sm border transition-all ${
+                  touring
+                    ? "border-amber-400/60 text-amber-200 bg-amber-500/20"
+                    : "border-neutral-700/60 text-neutral-400 hover:text-neutral-200 bg-black/40"
+                }`}
+              >
+                {touring ? "◉ touring — click to stop" : "▶ tour the place"}
+              </button>
 
               {picking && (
                 <div className="absolute top-4 right-4 text-[9px] tracking-[0.3em] uppercase text-violet-300/80 bg-black/60 px-3 py-1.5 backdrop-blur-sm">
