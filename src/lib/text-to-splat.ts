@@ -102,7 +102,7 @@ async function gzipAll(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(buf)
 }
 
-/** Full pipeline: prompt → generated image → depth-lifted cloud → .spz blob */
+/** Full pipeline: prompt → 4 wall images → depth-lifted clouds → merged into one full-room .spz */
 export async function buildSpzFromPrompt(
   prompt: string,
   mood: string,
@@ -116,97 +116,106 @@ export async function buildSpzFromPrompt(
   const imgW = opts.imageWidth ?? 1024
   const imgH = opts.imageHeight ?? 640
   const onPhase = opts.onPhase ?? (() => {})
+  const stride = opts.stride ?? 2
 
-  // 1. Generate the interior image (free Pollinations)
-  onPhase("imagining the place")
-  const styled = `${prompt}, wide interior room view, perspective from inside the space, ${mood} atmosphere`
-  const seed = Math.floor(Math.random() * 999999)
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-    styled
-  )}?width=${imgW}&height=${imgH}&nologo=true&seed=${seed}`
+  const VIEW_DIRS = [
+    { dir: "frontal wide view of the room, facing the scene head-on", yaw: 0 },
+    { dir: "wide view of the same room from the right side, ninety degrees turned", yaw: -Math.PI / 2 },
+    { dir: "wide view of the same room seen from directly behind, opposite side", yaw: Math.PI },
+    { dir: "wide view of the same room from the left side, ninety degrees turned", yaw: Math.PI / 2 },
+  ]
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(100_000) })
-  if (!res.ok) throw new Error("scene generation failed")
-  const blob = await res.blob()
-  const imageDataUrl = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader()
-    r.onload = () => resolve(r.result as string)
-    r.onerror = () => reject(new Error("read failed"))
-    r.readAsDataURL(blob)
-  })
-
-  // 2. Neural depth
-  onPhase("measuring the depth")
-  const { depth, width: dw, height: dh } = await estimateDepth(imageDataUrl)
-
-  // 3. Lift pixels into a dense colored point cloud
-  onPhase("lifting into 3D")
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const i = new Image()
-    i.crossOrigin = "anonymous"
-    i.onload = () => resolve(i)
-    i.onerror = () => reject(new Error("img load failed"))
-    i.src = imageDataUrl
-  })
-
-  const c = document.createElement("canvas")
-  c.width = imgW
-  c.height = imgH
-  const ctx = c.getContext("2d")!
-  ctx.drawImage(img, 0, 0, imgW, imgH)
-  const pixels = ctx.getImageData(0, 0, imgW, imgH).data
-
-  const stride = opts.stride ?? 1
   const WORLD_W = 12
-  const WORLD_H = WORLD_W * (imgH / imgW)
-  const DEPTH_RANGE = 9
+  const WORLD_R = 7 // radius of room volume
+  const DEPTH_RANGE = 5
 
-  const positions = new Float32Array(Math.ceil((imgW / stride) * (imgH / stride)) * 3 * 1)
-  const colors = new Float32Array(positions.length)
-  const alphas = new Float32Array(positions.length / 3).fill(1)
-  let p = 0
+  const allPositions: number[] = []
+  const allColors: number[] = []
+  let coverImage = ""
 
-  for (let py = 0; py < imgH; py += stride) {
-    for (let px = 0; px < imgW; px += stride) {
-      const src = (py * imgW + px) * 4
-      if (pixels[src + 3] < 10) continue
+  for (let vi = 0; vi < VIEW_DIRS.length; vi++) {
+    const { dir, yaw } = VIEW_DIRS[vi]
+    onPhase(`imagining the place · wall ${vi + 1}/4`)
 
-      const u = px / (imgW - 1)
-      const v = py / imgH
+    const styled = `${prompt}, wide interior room view, perspective from inside the space, ${dir}, ${mood} atmosphere`
+    const seed = Math.floor(Math.random() * 999999)
+    const u2 = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+      styled
+    )}?width=1024&height=640&nologo=true&seed=${Math.floor(Math.random() * 999999)}`
 
-      // sample depth (nearest)
-      const dx = Math.floor(u * (dw - 1))
-      const dy = Math.floor((1 - v) * (dh - 1))
-      const d = depth[dy * dw + dx] ?? 0
+    const res = await fetch(u2, { signal: AbortSignal.timeout(100_000) })
+    if (!res.ok) continue
+    const blob = await res.blob()
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(r.result as string)
+      r.onerror = () => reject(new Error("read failed"))
+      r.readAsDataURL(blob)
+    })
+    if (vi === 0) coverImage = dataUrl
 
-      const x = (u - 0.5) * WORLD_W
-      const y = (1 - v) * WORLD_H
-      const z = -d * DEPTH_RANGE
+    onPhase(`measuring the depth · wall ${vi + 1}/4`)
+    const { depth, width: dw, height: dh } = await estimateDepth(dataUrl)
 
-      positions[p * 3] = x
-      positions[p * 3 + 1] = y
-      positions[p * 3 + 2] = z
-      colors[p * 3] = pixels[src] / 255
-      colors[p * 3 + 1] = pixels[src + 1] / 255
-      colors[p * 3 + 2] = pixels[src + 2] / 255
-      p++
+    onPhase(`lifting into 3D · wall ${vi + 1}/4`)
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image()
+      i.crossOrigin = "anonymous"
+      i.onload = () => resolve(i)
+      i.onerror = () => reject(new Error("img load failed"))
+      i.src = dataUrl
+    })
+    const c = document.createElement("canvas")
+    c.width = 1024
+    c.height = 640
+    const ctx = c.getContext("2d")!
+    ctx.drawImage(img, 0, 0, 1024, 640)
+    const pixels = ctx.getImageData(0, 0, 1024, 640).data
+
+    for (let py = 0; py < 640; py += stride) {
+      for (let px = 0; px < 1024; px += stride) {
+        const src = (py * 1024 + px) * 4
+        if (pixels[src + 3] < 10) continue
+
+        const u = px / 1023
+        const yNorm = 1 - py / 639
+
+        const dx = Math.floor(u * (dw - 1))
+        const dy = Math.floor((1 - py / 639) * (dh - 1))
+        const d = depth[dy * dw + dx] ?? 0
+
+        // Place each wall's pixels on the corresponding side of the room volume
+        const localX = (u - 0.5) * 2 * WORLD_W * 0.8
+        const localY = yNorm * 10 - 1.5
+        const dist = WORLD_R - (1 - d) * DEPTH_RANGE * 0.6
+
+        // Rotate local wall plane into the room by yaw
+        const x = localX * Math.cos(yaw) + dist * Math.sin(yaw) * -1
+        const z = -localX * Math.sin(yaw) + dist * Math.cos(yaw) * -1
+
+        const rC = pixels[(py * 1024 + px) * 4] / 255
+        const gC = pixels[(py * 1024 + px) * 4 + 1] / 255
+        const bC = pixels[(py * 1024 + px) * 4 + 2] / 255
+
+        allPositions.push(x, localY, z)
+        allColors.push(rC, gC, bC)
+      }
     }
   }
 
-  const pointCount = p
-  const pos = positions.slice(0, pointCount * 3)
-  const col = colors.slice(0, pointCount * 3)
-  const alp = alphas.slice(0, pointCount)
+  const pointCount = allPositions.length / 3
+  const pos = new Float32Array(allPositions)
+  const col = new Float32Array(allColors)
+  const alphaArr = new Float32Array(pointCount).fill(1)
 
-  // 4. Encode as valid SPZ v2 (whole file gzipped, header included)
   onPhase("packing the splat")
-  const spzBuf = buildSpzBuffer(pos, col, alp)
+  const spzBuf = buildSpzBuffer(pos, col, alphaArr)
   const gzipped = await gzipAll(spzBuf)
 
   return {
     blob: new Blob([gzipped as unknown as BlobPart], { type: "application/octet-stream" }),
     pointCount,
-    imageDataUrl,
+    imageDataUrl: coverImage,
   }
 }
 

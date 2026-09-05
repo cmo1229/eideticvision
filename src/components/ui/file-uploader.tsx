@@ -47,7 +47,7 @@ export function FileUploader({ onUploadComplete }: UploaderProps) {
         const isImage = imageExts.includes(ext)
 
         if (isImage) {
-          // Read as base64 for RunwayML pipeline
+          // Read as base64 for the dream-splat pipeline
           setProgress(40)
           const base64 = await readAsBase64(file)
           setProgress(80)
