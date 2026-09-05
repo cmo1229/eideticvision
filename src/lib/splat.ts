@@ -147,8 +147,12 @@ export function orientCloud(geo: THREE.BufferGeometry): void {
  * Returns a colored point-cloud geometry.
  */
 export async function parseSpzFile(buffer: ArrayBuffer): Promise<THREE.BufferGeometry> {
-  const { loadSpz } = await import("@spz-loader/core")
-  const cloud = await loadSpz(new Uint8Array(buffer))
+  const createSpzModule = (await import("@adobe/spz")).default
+  const mod = await createSpzModule()
+  const cloud = mod.loadSpzFromBuffer(
+    buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer),
+    { to: mod.CoordinateSystem.RDF }
+  )
 
   const n = cloud.numPoints
   const positions = new Float32Array(n * 3)
@@ -159,12 +163,15 @@ export async function parseSpzFile(buffer: ArrayBuffer): Promise<THREE.BufferGeo
     positions[i * 3 + 1] = cloud.positions[i * 3 + 1]
     positions[i * 3 + 2] = cloud.positions[i * 3 + 2]
 
-    const alpha = cloud.alphas[i] / 255
-    // fade nearly-transparent splats toward the background
-    const a = Math.max(0.05, Math.min(1, alpha))
-    colors[i * 3] = cloud.colors[i * 3] * a
-    colors[i * 3 + 1] = cloud.colors[i * 3 + 1] * a
-    colors[i * 3 + 2] = cloud.colors[i * 3 + 2] * a
+    // Adobe returns colors mapped around 0.5 (0.5 + factor * c);
+    // renormalize into 0..1 for point rendering
+    const r = Math.max(0, Math.min(1, cloud.colors[i * 3] * 0.282 + 0.5))
+    const g = Math.max(0, Math.min(1, cloud.colors[i * 3 + 1] * 0.282 + 0.5))
+    const b = Math.max(0, Math.min(1, cloud.colors[i * 3 + 2] * 0.282 + 0.5))
+    const alpha = Math.max(0.05, Math.min(1, 1 / (1 + Math.exp(-cloud.alphas[i]))))
+    colors[i * 3] = r * alpha
+    colors[i * 3 + 1] = g * alpha
+    colors[i * 3 + 2] = b * alpha
   }
 
   const geo = new THREE.BufferGeometry()

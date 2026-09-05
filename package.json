@@ -9,11 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@adobe/spz": "^0.2.3",
     "@huggingface/transformers": "^4.2.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",
-    "@spz-loader/core": "^0.3.1",
     "@supabase/supabase-js": "^2.101.1",
     "axios": "^1.14.0",
     "next": "16.2.2",

@@ -13,108 +13,93 @@ import { estimateDepth } from "@/lib/depth"
 
 const FRACTIONAL_BITS = 12
 const FIXED_POINT_SCALE = 1 << FRACTIONAL_BITS // 4096
-const SPZ_MAGIC = 0x50
+const NGSP_MAGIC = 0x5053474e // "NGSP"
 const SPZ_VERSION = 2
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v))
 }
 
-/** Quantize a float coordinate to 24-bit fixed point (3 bytes, little-endian) */
-function quantizePos24(v: number): [number, number, number] {
-  const fixed = Math.round(v * FIXED_POINT_SCALE)
-  const clamped = Math.max(-8388608, Math.min(8388607, fixed))
-  const u = clamped < 0 ? clamped + 16777216 : clamped
-  return [u & 0xff, (u >> 8) & 0xff, (u >> 16) & 0xff]
-}
-
-/** Scale in log-space, 8 bits — we emit a uniform small splat scale */
-function quantizeScale(s: number): number {
-  // SPZ scales are log-quantized between 2^-9.5 and 2^7.5
-  const lo = Math.log2(Math.pow(2, -9.5))
-  const hi = Math.log2(Math.pow(2, 7.5))
+/** Quantize scale to 8-bit log space (2^-9.5 .. 2^7.5) */
+function quantizeScale8(s: number): number {
+  const lo = -9.5
+  const hi = 7.5
   const t = (Math.log2(Math.max(s, 1e-8)) - lo) / (hi - lo)
-  return Math.round(clamp(t, 0, 1) * 255)
-}
-
-/** async gzip via native CompressionStream */
-async function gzip(data: Uint8Array): Promise<Uint8Array> {
-  const CS = (globalThis as { CompressionStream?: typeof CompressionStream }).CompressionStream
-  if (!CS) throw new Error("CompressionStream unavailable in this browser")
-  const stream = new Blob([data as unknown as BlobPart])
-    .stream()
-    .pipeThrough(new CompressionStream("gzip"))
-  const buf = await new Response(stream).arrayBuffer()
-  return new Uint8Array(buf)
+  return Math.round(Math.max(0, Math.min(1, t)) * 255)
 }
 
 /**
- * Encode a point cloud as a valid SPZ v2 file.
- * Layout after the 16-byte header (all arrays sequential, per attribute):
- *   positions: n × 3 coords, each 24-bit fixed-point (3 bytes LE)
- *   scales:    n × 3 bytes (log-quantized)
- *   rotations: n × 4 bytes (smallest-three; identity quaternions here)
- *   alphas:    n × 1 byte
- *   colors:    n × 3 bytes (linear RGB 0-255)
- * The whole body is gzip-compressed.
+ * Build the raw (pre-gzip) SPZ v2 body: 16-byte header + attributes
+ * in spec order: positions → alphas → colors → scales → rotations → (sh)
+ * Positions: 24-bit signed fixed-point, fractionalBits after the point.
+ * Rotations v2: xyz of normalized quaternion as 8-bit SIGNED ints, w omitted.
+ * The ENTIRE buffer (header + body) is gzipped as one stream.
  */
-export function encodeSpz(
-  positions: Float32Array, // length n*3, flattened xyz
-  colors: Float32Array,    // 0..1
+function buildSpzBuffer(
+  positions: Float32Array,
+  colors: Float32Array,
   alphas: Float32Array | null,
-  fractionalBits = FRACTIONAL_BITS
+  fractionalBits = 12
 ): Uint8Array {
   const n = positions.length / 3
 
-  const header = new Uint8Array(16)
-  header[0] = SPZ_MAGIC
-  header[1] = SPZ_VERSION
-  header[2] = n & 0xff
-  header[3] = (n >> 8) & 0xff
-  header[4] = (n >> 16) & 0xff
-  header[5] = 0 // shDegree 0 → view-independent colors
-  header[6] = fractionalBits
-  header[7] = 0 // flags
-  header[8] = 0 // reserved
+  const header = new DataView(new ArrayBuffer(16))
+  header.setUint32(0, NGSP_MAGIC, true)
+  header.setUint32(4, 2, true) // version 2
+  header.setUint32(8, n, true)
+  header.setUint8(12, 0) // shDegree 0 → view-independent colors
+  header.setUint8(13, fractionalBits)
+  header.setUint8(14, 0) // flags
+  header.setUint8(15, 0) // reserved
 
-  const body = new Uint8Array(n * (9 + 3 + 4 + 1 + 3))
+  const fixedScale = 1 << fractionalBits
+  const posBytes = n * 3 * 3
+  const body = new Uint8Array(posBytes + n + n * 3 + n * 3 + n * 4)
   let o = 0
 
-  // positions — component planes: all X, then all Y, then all Z
-  for (let axis = 0; axis < 3; axis++) {
-    for (let i = 0; i < n; i++) {
-      const fixed = Math.round(positions[i * 3 + axis] * FIXED_POINT_SCALE)
-      const clamped = Math.max(-8388608, Math.min(8388607, fixed))
-      const u = clamped < 0 ? clamped + 16777216 : clamped
+  // positions — 24-bit fixed point, interleaved xyz per point
+  for (let i = 0; i < n; i++) {
+    for (let axis = 0; axis < 3; axis++) {
+      const v = positions[i * 3 + axis] * fixedScale
+      const fixed = Math.max(-8388608, Math.min(8388607, Math.round(v)))
+      const u = fixed < 0 ? fixed + 16777216 : fixed
       body[o++] = u & 0xff
       body[o++] = (u >> 8) & 0xff
       body[o++] = (u >> 16) & 0xff
     }
   }
 
-  // scales
-  const scaleByte = quantizeScale(0.018)
-  for (let i = 0; i < n * 3; i++) body[o++] = scaleByte
-
-  // rotations — identity quaternion, 8-bit components (xyzw → w dominant)
-  for (let i = 0; i < n; i++) {
-    body[o++] = 128
-    body[o++] = 128
-    body[o++] = 128
-    body[o++] = 255 // w dominant
-  }
-
   // alphas
   for (let i = 0; i < n; i++) {
-    body[o++] = alphas ? Math.round(clamp(alphas[i], 0, 1) * 255) : 255
+    body[o++] = alphas ? Math.round(Math.max(0, Math.min(1, alphas[i])) * 255) : 255
   }
 
   // colors
   for (let i = 0; i < n * 3; i++) {
-    body[o++] = Math.round(clamp(colors[i], 0, 1) * 255)
+    body[o++] = Math.round(Math.max(0, Math.min(1, colors[i])) * 255)
   }
 
-  return body // caller gzips
+  // scales — small uniform log-quantized
+  const scaleByte = quantizeScale8(0.015)
+  for (let i = 0; i < n * 3; i++) body[o++] = scaleByte
+
+  // rotations v2 — identity quaternion: xyz = 0 (signed 8-bit), w implied
+  for (let i = 0; i < n * 4; i++) body[o++] = 128 // 128 = 0 in signed 8-bit offset encoding
+
+  const out = new Uint8Array(16 + body.length)
+  out.set(new Uint8Array(header.buffer), 0)
+  out.set(body, 16)
+  return out
+}
+
+async function gzipAll(data: Uint8Array): Promise<Uint8Array> {
+  const CS = (globalThis as { CompressionStream?: typeof CompressionStream }).CompressionStream
+  if (!CS) throw new Error("CompressionStream unavailable")
+  const stream = new Blob([data as unknown as BlobPart])
+    .stream()
+    .pipeThrough(new CompressionStream("gzip"))
+  const buf = await new Response(stream).arrayBuffer()
+  return new Uint8Array(buf)
 }
 
 /** Full pipeline: prompt → generated image → depth-lifted cloud → .spz blob */
@@ -213,30 +198,13 @@ export async function buildSpzFromPrompt(
   const col = colors.slice(0, pointCount * 3)
   const alp = alphas.slice(0, pointCount)
 
-  // 4. Encode + compress
+  // 4. Encode as valid SPZ v2 (whole file gzipped, header included)
   onPhase("packing the splat")
-  const rawBody = encodeSpz(pos, col, alp)
-  const gzipped = await gzip(rawBody)
-
-  // Prepend header to compressed body
-  const n = pointCount
-  const header = new Uint8Array(16)
-  header[0] = SPZ_MAGIC
-  header[1] = SPZ_VERSION
-  header[2] = n & 0xff
-  header[3] = (n >> 8) & 0xff
-  header[4] = (n >> 16) & 0xff
-  header[5] = 0
-  header[6] = FRACTIONAL_BITS
-  header[7] = 0
-  header[8] = 0
-
-  const out = new Uint8Array(header.length + gzipped.length)
-  out.set(header, 0)
-  out.set(gzipped, header.length)
+  const spzBuf = buildSpzBuffer(pos, col, alp)
+  const gzipped = await gzipAll(spzBuf)
 
   return {
-    blob: new Blob([out as unknown as BlobPart], { type: "application/octet-stream" }),
+    blob: new Blob([gzipped as unknown as BlobPart], { type: "application/octet-stream" }),
     pointCount,
     imageDataUrl,
   }
@@ -254,4 +222,4 @@ export function cloudToGeometry(positions: Float32Array, colors: Float32Array): 
   return geo
 }
 
-export { gzip as gzipBytes }
+export { gzipAll as gzipBytes }
