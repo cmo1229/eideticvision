@@ -13,24 +13,27 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "EideticVision",
-  description: "Upload, process, and explore your spatial captures as 3D scenes.",
+  title: "EideticVision — Keep the places you can't keep forever",
+  description:
+    "Turn meaningful places into collaborative spatial archives. Preserve a place in 3D, attach stories, photos and voices to where they happened, and move through its history with a timeline.",
   openGraph: {
-    title: "EideticVision",
-    description: "Upload, process, and explore your spatial captures as 3D scenes.",
+    title: "EideticVision — Keep the places you can't keep forever",
+    description:
+      "Preserve a meaningful place in 3D. Add the stories that happened there. Invite the people who remember it. Explore its history through time.",
     images: [
       {
         url: "/opengraph-image.png",
         width: 1200,
         height: 630,
-        alt: "EideticVision — Spatial Memories, Rendered",
+        alt: "EideticVision — collaborative spatial archives",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "EideticVision",
-    description: "Upload, process, and explore your spatial captures as 3D scenes.",
+    title: "EideticVision — Keep the places you can't keep forever",
+    description:
+      "Preserve a meaningful place in 3D. Add the stories that happened there. Invite the people who remember it.",
     images: ["/opengraph-image.png"],
   },
   icons: {

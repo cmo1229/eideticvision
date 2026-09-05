@@ -81,8 +81,11 @@ export default function Page() {
           </h1>
 
           <p className="mt-7 text-neutral-300 text-sm md:text-base font-light leading-relaxed max-w-xl">
-            Preserve a meaningful place in 3D. Add the stories that happened there.
-            Invite the people who remember it. Explore its history through time.
+            Turn meaningful places into{" "}
+            <span className="text-neutral-100">collaborative spatial archives</span> — preserve
+            the space in 3D, attach the stories, photos and voices to{" "}
+            <span className="text-neutral-100">where they happened</span>, and move through its
+            history with a timeline.
           </p>
 
           <p className="mt-10 text-[10px] tracking-[0.4em] uppercase text-neutral-400">
