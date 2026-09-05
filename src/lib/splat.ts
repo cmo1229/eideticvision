@@ -44,31 +44,102 @@ export function parseSplatFile(buffer: ArrayBuffer): THREE.BufferGeometry {
 }
 
 /**
- * After PLYLoader parses a 3DGS PLY, vertex colors may live in
- * f_dc_0..2 (spherical harmonics DC term) instead of r/g/b.
- * Convert: color = 0.5 + SH_C0 * f_dc
+ * Normalize any PLY into a colored, right-side-up point cloud.
+ * Handles: SH DC colors (f_dc_*), uchar r/g/b, alternate property names,
+ * opacity gating, and 3DGS coordinate convention (Y-down → Y-up).
  */
 export function ensurePlyColors(geo: THREE.BufferGeometry): THREE.BufferGeometry {
-  if (geo.attributes.color) return geo
+  const n = geo.attributes.position.count
+  const notes: string[] = []
 
-  const dc0 = geo.attributes.f_dc_0
-  const dc1 = geo.attributes.f_dc_1
-  const dc2 = geo.attributes.f_dc_2
-  if (dc0 && dc1 && dc2) {
+  if (!geo.attributes.color) {
     const SH_C0 = 0.28209479177387814
-    const n = dc0.count
-    const colors = new Float32Array(n * 3)
-    for (let i = 0; i < n; i++) {
-      colors[i * 3] = Math.max(0, Math.min(1, 0.5 + SH_C0 * dc0.getX(i)))
-      colors[i * 3 + 1] = Math.max(0, Math.min(1, 0.5 + SH_C0 * dc1.getX(i)))
-      colors[i * 3 + 2] = Math.max(0, Math.min(1, 0.5 + SH_C0 * dc2.getX(i)))
+    const dc0 = geo.attributes.f_dc_0
+    const dc1 = geo.attributes.f_dc_1
+    const dc2 = geo.attributes.f_dc_2
+
+    if (dc0 && dc1 && dc2) {
+      // 3DGS SH DC term
+      const colors = new Float32Array(n * 3)
+      for (let i = 0; i < n; i++) {
+        colors[i * 3] = Math.max(0, Math.min(1, 0.5 + SH_C0 * dc0.getX(i)))
+        colors[i * 3 + 1] = Math.max(0, Math.min(1, 0.5 + SH_C0 * dc1.getX(i)))
+        colors[i * 3 + 2] = Math.max(0, Math.min(1, 0.5 + SH_C0 * dc2.getX(i)))
+      }
+      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3))
+    } else {
+      // Some exporters: uchar red/green/blue or similar already mapped
+      // by PLYLoader to 'color'; anything else → check scale_ / color_*
+      geo.setAttribute(
+        "color",
+        new THREE.BufferAttribute(new Float32Array(n * 3).fill(0.72), 3)
+      )
     }
-    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3))
-  } else {
-    const n = geo.attributes.position.count
-    geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(0.72), 3))
   }
+
+  // Opacity gating: 3DGS stores sigmoid(opacity); very low opacity splats
+  // are invisible — darken them out rather than showing white ghosts.
+  const opacity = geo.attributes.opacity
+  const colors = geo.attributes.color as THREE.BufferAttribute | undefined
+  if (opacity && colors) {
+    const arr = colors.array as Float32Array
+    for (let i = 0; i < n; i++) {
+      const o = 1 / (1 + Math.exp(-opacity.getX(i)))
+      if (o < 0.25) {
+        // push invisible splats toward black so they don't read as white
+        arr[i * 3] *= 0.06
+        arr[i * 3 + 1] *= 0.06
+        arr[i * 3 + 2] *= 0.06
+      }
+    }
+    colors.needsUpdate = true
+  }
+
+  orientCloud(geo)
   return geo
+}
+
+/**
+ * 3DGS PLYs from Scaniverse/Luma are commonly Y-down (or Z-up).
+ * Detect orientation from the mass distribution: in a room scan the
+ * floor (dense horizontal surface) sits below the ceiling. If the
+ * histogram of Y is top-heavy relative to XZ spread, flip.
+ */
+export function orientCloud(geo: THREE.BufferGeometry): void {
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  const n = pos.count
+
+  // Sample for speed
+  const sample = Math.min(n, 40000)
+  const step = Math.max(1, Math.floor(n / 40000))
+
+  // Gather extent
+  let yMin = Infinity, yMax = -Infinity
+  for (let i = 0; i < n; i += step) {
+    const y = pos.getY(i)
+    if (y < yMin) yMin = y
+    if (y > yMax) yMax = y
+  }
+
+  // The floor of a room scan is usually the denser extreme surface
+  // (furniture + floor). In 3DGS exports (Y-down convention), the floor
+  // ends up at max-Y. If the top band is denser → the cloud is Y-down
+  // and must be flipped so the floor lands at the bottom.
+  let bottomBand = 0, topBand = 0
+  const band = (yMax - yMin) * 0.08
+  for (let i = 0; i < n; i += step) {
+    const y = pos.getY(i)
+    if (y < yMin + band) bottomBand++
+    else if (y > yMax - band) topBand++
+  }
+  if (bottomBand < topBand * 0.75) {
+    geo.scale(1, -1, 1)
+  }
+  // Recenter after flip
+  geo.computeBoundingBox()
+  const center = new THREE.Vector3()
+  geo.boundingBox!.getCenter(center)
+  geo.translate(-center.x, -center.y, -center.z)
 }
 
 /**
