@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
-import { PLYLoader } from "three-stdlib"
-import { parseSplatFile, ensurePlyColors, parseSpzFile, splatKind } from "@/lib/splat"
+import { parseSplatFile, parseSpzFile, splatKind } from "@/lib/splat"
+import { parseGsPly, gsOrient } from "@/lib/gs-ply"
 import * as THREE from "three"
 import { Nav } from "@/components/landing/atmosphere"
 import { RetentionBar } from "@/components/ui/progress"
@@ -104,25 +104,38 @@ function SplatPoints({
           if (cancelled) return
           setGeometry(parseSplatFile(buf))
         } else {
-          const url = URL.createObjectURL(blob)
-          new PLYLoader().load(
-            url,
-            (geo) => {
-              URL.revokeObjectURL(url)
-              if (cancelled) return
-              ensurePlyColors(geo)
-              geo.computeBoundingBox()
-              const center = new THREE.Vector3()
-              geo.boundingBox!.getCenter(center)
-              geo.translate(-center.x, -center.y, -center.z)
-              setGeometry(geo)
-            },
-            undefined,
-            () => {
-              URL.revokeObjectURL(url)
-              if (!cancelled) setError("could not read this splat file — try exporting as .ply from SuperSplat")
-            }
-          )
+          // Our own 3DGS PLY parser: reads f_dc/opacity that PLYLoader drops
+          const buf = await blob.arrayBuffer()
+          if (cancelled) return
+          const data = parseGsPly(buf)
+          // 3DGS signature = f_dc/opacity/scale properties → deterministic flip
+          const is3dgs = data.hasOpacity || data.hasSH
+          gsOrient(data.positions, is3dgs)
+
+          // Cull invisible splats rather than showing white ghosts
+          const visible: number[] = []
+          const visColors: number[] = []
+          for (let i = 0; i < data.count; i++) {
+            if (data.alphas[i] < 0.15) continue
+            visible.push(data.positions[i*3], data.positions[i*3+1], data.positions[i*3+2])
+            visColors.push(data.colors[i*3], data.colors[i*3+1], data.colors[i*3+2])
+          }
+          const geo = new THREE.BufferGeometry()
+          geo.setAttribute("position", new THREE.Float32BufferAttribute(visible, 3))
+          geo.setAttribute("color", new THREE.Float32BufferAttribute(visColors, 3))
+          geo.computeBoundingBox()
+          const center = new THREE.Vector3()
+          geo.boundingBox!.getCenter(center)
+          geo.translate(-center.x, -center.y, -center.z)
+
+          // Auto point size from the cloud's physical extent
+          const ext = new THREE.Vector3()
+          geo.boundingBox!.getSize(ext)
+          const maxDim = Math.max(ext.x, ext.y, ext.z)
+          ;(geo as unknown as { userData: { pointSize: number } }).userData.pointSize =
+            Math.max(0.008, Math.min(0.06, maxDim / 420))
+
+          setGeometry(geo)
         }
       } catch {
         if (!cancelled) setError("could not read this splat file")
@@ -151,10 +164,7 @@ function LiveCloud({
   onPick: (p: [number, number, number]) => void
 }) {
   const ref = useRef<THREE.Points>(null!)
-  const basePositions = useMemo(
-    () => (geometry.attributes.position.array as Float32Array).slice(),
-    [geometry]
-  )
+  const pointSize = (geometry as unknown as { userData?: { pointSize?: number } }).userData?.pointSize ?? 0.02
 
   // Ambient motion: the memory breathes — gentle organic sway
   useFrame(() => {
@@ -173,7 +183,7 @@ function LiveCloud({
         onPick([e.point.x, e.point.y, e.point.z])
       }}
     >
-      <pointsMaterial size={0.02} vertexColors sizeAttenuation />
+      <pointsMaterial size={pointSize} vertexColors sizeAttenuation />
     </points>
   )
 }
