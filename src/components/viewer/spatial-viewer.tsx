@@ -145,13 +145,23 @@ export function Placeholder({
       }`}
     >
       <div
-        className="w-px bg-neutral-800 mb-6"
+        className="w-px bg-neutral-700 mb-6"
         style={{ height: compact ? "24px" : "64px" }}
       />
-      <p className="text-[11px] tracking-[0.35em] uppercase text-neutral-500">{label}</p>
-      {detail && <p className="mt-3 max-w-sm text-xs text-neutral-600 leading-relaxed">{detail}</p>}
+      <p
+        className={`uppercase text-neutral-200 ${compact ? "text-[12px] tracking-[0.25em]" : "text-lg md:text-xl font-light tracking-[0.15em]"}`}
+      >
+        {label}
+      </p>
+      {detail && (
+        <p
+          className={`mt-4 max-w-md leading-relaxed text-neutral-400 ${compact ? "text-[11px]" : "text-sm font-light"}`}
+        >
+          {detail}
+        </p>
+      )}
       <div
-        className="w-px bg-neutral-800 mt-6"
+        className="w-px bg-neutral-700 mt-6"
         style={{ height: compact ? "24px" : "64px" }}
       />
     </div>
@@ -183,6 +193,8 @@ export default function SpatialViewer({
   const hasCapture = !!splatUrl
   const [splatReady, setSplatReady] = useState(false)
   const [splatError, setSplatError] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Reset per-URL load state (intentional sync reset on capture change)
   useEffect(() => {
@@ -190,6 +202,35 @@ export default function SpatialViewer({
     setSplatReady(false)
     setSplatError(null)
   }, [splatUrl])
+
+  // Track fullscreen state so the button label and ESC hint stay accurate.
+  // ESC exits fullscreen natively; this listener keeps the UI in sync.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener("fullscreenchange", onChange)
+    // Guaranteed ESC exit even when the browser doesn't handle it itself
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {})
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [])
+
+  const toggleFullscreen = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const el = containerRef.current
+    if (!el) return
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {})
+    } else {
+      el.requestFullscreen().catch(() => {})
+    }
+  }
 
   const handleSurfaceClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onSurfacePick || hasCapture) return
@@ -203,6 +244,7 @@ export default function SpatialViewer({
 
   return (
     <div
+      ref={containerRef}
       className={`relative w-full h-full bg-[#060607] overflow-hidden select-none ${className}`}
       onClick={handleSurfaceClick}
     >
@@ -249,6 +291,19 @@ export default function SpatialViewer({
           }
         />
       )}
+
+      {/* Viewer chrome — fullscreen toggle (ESC exits) */}
+      <button
+        onClick={toggleFullscreen}
+        className={`absolute top-3 right-3 z-30 px-3 py-1.5 text-[9px] tracking-[0.25em] uppercase backdrop-blur-sm border transition-all ${
+          isFullscreen
+            ? "border-[#c9bda4]/50 text-[#f5efe2] bg-black/60"
+            : "border-neutral-700/60 text-neutral-400 hover:text-neutral-100 hover:border-neutral-500 bg-black/40"
+        }`}
+        title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
+      >
+        {isFullscreen ? "× exit fullscreen · esc" : "⛶ fullscreen"}
+      </button>
 
       {/* HTML overlay layer — memory markers, HUD. Rendering engine stays below. */}
       {children}

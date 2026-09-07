@@ -29,9 +29,9 @@ const IDEAS = [
 ]
 
 const STUDIO_PINS = [
-  { x: 0.24, y: 0.42, label: "First Night Here" },
-  { x: 0.55, y: 0.36, label: "Late Night Dinner" },
-  { x: 0.76, y: 0.55, label: "The Desk" },
+  { x: 0.24, y: 0.42, label: "First Night Here", color: "#c4b5fd", glow: "rgba(167,139,250,0.55)" },
+  { x: 0.55, y: 0.36, label: "Late Night Dinner", color: "#fcd34d", glow: "rgba(251,191,36,0.4)" },
+  { x: 0.76, y: 0.55, label: "The Desk", color: "#67e8f9", glow: "rgba(103,232,249,0.4)" },
 ]
 
 export default function Page() {
@@ -54,7 +54,24 @@ export default function Page() {
       <Nav />
 
       {/* Hero */}
-      <section className="min-h-screen flex flex-col items-center justify-center px-6 pt-24 pb-16 relative">
+      <section className="min-h-screen flex flex-col items-center justify-center px-6 pt-24 pb-16 relative overflow-hidden">
+        {/* Cinematic video field */}
+        <div className="absolute inset-0 z-0">
+          <video autoPlay muted loop playsInline preload="auto" className="w-full h-full object-cover">
+            <source src="/background.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div className="absolute inset-0 z-[1] bg-black/55" />
+        <div className="absolute inset-0 z-[1] bg-gradient-to-b from-[#060607]/70 via-transparent to-[#060607]" />
+        {/* brand color wash */}
+        <div
+          className="absolute inset-0 z-[1] pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 60% 45% at 50% 42%, rgba(139,92,246,0.14), transparent 70%), radial-gradient(ellipse 45% 35% at 78% 62%, rgba(34,211,238,0.07), transparent 70%), radial-gradient(ellipse 40% 30% at 22% 60%, rgba(217,70,239,0.07), transparent 70%)",
+          }}
+        />
+
         <div
           className="relative z-10 flex flex-col items-center text-center max-w-3xl"
           style={{
@@ -63,13 +80,18 @@ export default function Page() {
             transition: "all 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.1s",
           }}
         >
-          <h1 className="text-4xl md:text-6xl font-extralight tracking-[-0.02em] leading-[1.08] text-neutral-100">
-            Keep the places you
+          <p className="text-[10px] tracking-[0.5em] uppercase text-violet-300/80 mb-8">
+            the spatial archive of a life
+          </p>
+          <h1 className="text-4xl md:text-6xl font-extralight tracking-[-0.02em] leading-[1.08]">
+            <span className="text-neutral-100 font-light">Keep the places you</span>
             <br />
-            can&apos;t keep forever.
+            <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent font-light">
+              can&apos;t keep forever.
+            </span>
           </h1>
 
-          <p className="mt-7 text-neutral-400 text-sm md:text-base font-light leading-relaxed max-w-xl">
+          <p className="mt-7 text-neutral-300 text-sm md:text-base font-light leading-relaxed max-w-xl">
             Preserve a meaningful place in 3D. Add the stories that happened there. Invite the
             people who remember it. Explore its history through time.
           </p>
@@ -77,13 +99,13 @@ export default function Page() {
           <div className="mt-10 flex flex-col sm:flex-row items-center gap-4">
             <Link
               href={exploreHref}
-              className="px-8 py-3.5 text-[11px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all"
+              className="px-8 py-3.5 text-[11px] tracking-[0.3em] uppercase border border-violet-400/50 text-violet-100 bg-violet-500/[0.1] hover:bg-violet-500/[0.2] hover:border-violet-300/70 transition-all shadow-[0_0_30px_rgba(139,92,246,0.15)]"
             >
               Explore a Place
             </Link>
             <Link
               href="/create"
-              className="px-8 py-3.5 text-[11px] tracking-[0.3em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 transition-all"
+              className="px-8 py-3.5 text-[11px] tracking-[0.3em] uppercase border border-neutral-700/70 text-neutral-300 hover:border-neutral-500 hover:text-neutral-100 bg-black/30 backdrop-blur-sm transition-all"
             >
               Create a Place
             </Link>
@@ -101,16 +123,16 @@ export default function Page() {
         >
           <Link
             href={exploreHref}
-            className="group block border border-neutral-900 hover:border-neutral-700 transition-colors"
+            className="group block border border-violet-500/25 hover:border-violet-400/50 transition-colors shadow-[0_0_60px_rgba(139,92,246,0.08)]"
           >
-            <div className="relative aspect-[21/9] bg-[#08080a] overflow-hidden">
+            <div className="relative aspect-[21/9] bg-[#0a0810]/90 backdrop-blur-sm overflow-hidden">
               {/* archival frame — an honest preview, not a fake capture */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
-                  <p className="text-[9px] tracking-[0.4em] uppercase text-neutral-600">
+                  <p className="text-[9px] tracking-[0.4em] uppercase text-violet-300/70">
                     featured place
                   </p>
-                  <p className="mt-3 text-lg font-extralight text-neutral-300 tracking-wide">
+                  <p className="mt-3 text-lg font-extralight text-neutral-200 tracking-wide">
                     Studio Apartment
                   </p>
                   <p className="mt-1.5 text-[9px] tracking-[0.3em] uppercase text-neutral-600">
@@ -125,13 +147,16 @@ export default function Page() {
                   className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
                   style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
                 >
-                  <span className="w-2 h-2 rounded-full bg-[#c9bda4]/80 group-hover:bg-[#f5efe2] transition-colors" />
-                  <span className="mt-2 text-[8px] tracking-[0.2em] uppercase text-neutral-700 group-hover:text-neutral-500 transition-colors">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full group-hover:scale-125 transition-transform"
+                    style={{ background: p.color, boxShadow: `0 0 12px ${p.glow}` }}
+                  />
+                  <span className="mt-2 text-[8px] tracking-[0.2em] uppercase text-neutral-500 group-hover:text-neutral-300 transition-colors">
                     {p.label}
                   </span>
                 </span>
               ))}
-              <div className="absolute bottom-4 right-5 text-[9px] tracking-[0.3em] uppercase text-neutral-600 group-hover:text-neutral-400 transition-colors">
+              <div className="absolute bottom-4 right-5 text-[9px] tracking-[0.3em] uppercase text-violet-300/60 group-hover:text-violet-200 transition-colors">
                 enter the place →
               </div>
             </div>
@@ -173,19 +198,26 @@ export default function Page() {
       </section>
 
       {/* Final CTA */}
-      <section className="max-w-2xl mx-auto px-6 pb-40 text-center">
+      <section className="max-w-2xl mx-auto px-6 pb-40 text-center relative">
+        <div
+          className="absolute inset-x-0 bottom-0 h-64 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 50% 60% at 50% 100%, rgba(139,92,246,0.1), transparent 70%)",
+          }}
+        />
         <div className="flex items-center justify-center gap-3 mb-14">
-          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">place</span>
-          <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">memories</span>
-          <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">people</span>
-          <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">time</span>
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">place</span>
+          <span className="w-1 h-1 rounded-full bg-violet-400/60" />
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">memories</span>
+          <span className="w-1 h-1 rounded-full bg-fuchsia-400/60" />
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">people</span>
+          <span className="w-1 h-1 rounded-full bg-cyan-400/60" />
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">time</span>
         </div>
         <Link
           href={exploreHref}
-          className="inline-block px-10 py-4 text-[11px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all"
+          className="relative inline-block px-10 py-4 text-[11px] tracking-[0.3em] uppercase border border-violet-400/50 text-violet-100 bg-violet-500/[0.1] hover:bg-violet-500/[0.2] hover:border-violet-300/70 transition-all"
         >
           Explore a Place
         </Link>
