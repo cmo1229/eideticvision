@@ -110,57 +110,22 @@ export default function Page() {
               Create a Place
             </Link>
           </div>
-        </div>
 
-        {/* Featured place preview */}
-        <div
-          className="relative z-10 mt-20 w-full max-w-4xl"
-          style={{
-            opacity: mounted ? 1 : 0,
-            transform: mounted ? "translateY(0)" : "translateY(24px)",
-            transition: "all 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.4s",
-          }}
-        >
-          <Link
-            href={exploreHref}
-            className="group block border border-violet-500/25 hover:border-violet-400/50 transition-colors shadow-[0_0_60px_rgba(139,92,246,0.08)]"
+          <p
+            className="mt-8 text-[10px] tracking-[0.3em] uppercase"
+            style={{
+              opacity: mounted ? 1 : 0,
+              transition: "opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.9s",
+            }}
           >
-            <div className="relative aspect-[21/9] bg-[#0a0810]/90 backdrop-blur-sm overflow-hidden">
-              {/* archival frame — an honest preview, not a fake capture */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <p className="text-[9px] tracking-[0.4em] uppercase text-violet-300/70">
-                    featured place
-                  </p>
-                  <p className="mt-3 text-lg font-extralight text-neutral-200 tracking-wide">
-                    Studio Apartment
-                  </p>
-                  <p className="mt-1.5 text-[9px] tracking-[0.3em] uppercase text-neutral-600">
-                    Claremont, California · 2025–2026
-                  </p>
-                </div>
-              </div>
-              {/* memory pins, waiting where they were left */}
-              {STUDIO_PINS.map((p) => (
-                <span
-                  key={p.label}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
-                  style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
-                >
-                  <span
-                    className="w-2.5 h-2.5 rounded-full group-hover:scale-125 transition-transform"
-                    style={{ background: p.color, boxShadow: `0 0 12px ${p.glow}` }}
-                  />
-                  <span className="mt-2 text-[8px] tracking-[0.2em] uppercase text-neutral-500 group-hover:text-neutral-300 transition-colors">
-                    {p.label}
-                  </span>
-                </span>
-              ))}
-              <div className="absolute bottom-4 right-5 text-[9px] tracking-[0.3em] uppercase text-violet-300/60 group-hover:text-violet-200 transition-colors">
-                enter the place →
-              </div>
-            </div>
-          </Link>
+            <span className="text-neutral-600">featured · </span>
+            <Link
+              href={exploreHref}
+              className="text-violet-300/80 hover:text-violet-200 transition-colors"
+            >
+              Studio Apartment — Claremont, California · 2025–2026 →
+            </Link>
+          </p>
         </div>
       </section>
 
