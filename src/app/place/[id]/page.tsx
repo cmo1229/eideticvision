@@ -11,6 +11,7 @@ import SpatialViewer from "@/components/viewer/spatial-viewer"
 import { Nav } from "@/components/landing/atmosphere"
 import {
   getPlace,
+  deletePlace,
   loadMemories,
   saveMemory,
   deleteMemory,
@@ -759,6 +760,79 @@ function AboutPanel({
   )
 }
 
+/* ---------------- Danger zone (delete place) ---------------- */
+
+function DangerZone({
+  place,
+  onDeleted,
+}: {
+  place: Place
+  onDeleted: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setError(null)
+    try {
+      if (place.cloudId) {
+        await unpublishPlace(place.cloudId).catch(() => {})
+      }
+      deletePlace(place.id)
+      onDeleted()
+    } catch {
+      setError("could not delete the place")
+      setDeleting(false)
+      setConfirming(false)
+    }
+  }
+
+  return (
+    <div className="border border-red-500/20 bg-[#0a0a0b]/95 p-5">
+      {!confirming ? (
+        <>
+          <p className="text-[9px] tracking-[0.3em] uppercase text-red-400/60">danger zone</p>
+          <button
+            onClick={() => setConfirming(true)}
+            className="mt-3 text-[10px] tracking-[0.25em] uppercase text-neutral-500 hover:text-red-300 transition-colors"
+          >
+            delete this place…
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-neutral-200 leading-relaxed">
+            Delete <span className="text-neutral-100">{place.name}</span> forever?
+          </p>
+          <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+            {place.cloudId
+              ? "Removes the place, its memories and its capture from this device and the public archive."
+              : "Removes the place, its memories and its capture from this device. This cannot be undone."}
+          </p>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-4 py-2 text-[9px] tracking-[0.25em] uppercase border border-red-400/50 text-red-300 bg-red-500/[0.08] hover:bg-red-500/[0.16] transition-colors disabled:opacity-40"
+            >
+              {deleting ? "deleting…" : "yes, delete forever"}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="px-4 py-2 text-[9px] tracking-[0.25em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 transition-colors"
+            >
+              keep it
+            </button>
+          </div>
+          {error && <p className="mt-3 text-[10px] text-red-400/80">{error}</p>}
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ---------------- Page ---------------- */
 
 type Panel = "memories" | "contributors" | "about"
@@ -1140,6 +1214,12 @@ export default function PlacePage() {
                   later, to shared storage.
                 </p>
               </div>
+              )}
+              {!isCloud && (
+                <DangerZone
+                  place={place}
+                  onDeleted={() => router.push("/places")}
+                />
               )}
               <button
                 onClick={() => router.push(isCloud ? "/explore" : "/places")}
