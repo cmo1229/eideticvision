@@ -112,19 +112,26 @@ function mapMemoryToRow(memory: Memory, placeId: string) {
   }
 }
 
-/** Publish a local place: uploads cover/splat, inserts place + memories. */
-export async function publishPlace(
+/** Sync a local place to the cloud (create or update).
+ *  makePublic=false → shared privately with invited members only.
+ *  makePublic=true  → listed in the public archive.
+ *  First sync copies the memories; afterwards the cloud copy is the
+ *  source of truth (owner + contributors write to it directly). */
+export async function syncPlaceToCloud(
   place: Place,
   memories: Memory[],
-  splatBlob: Blob | null
+  splatBlob: Blob | null,
+  makePublic: boolean
 ): Promise<PublishResult> {
   const supabase = getSupabase()
   const { data } = await supabase.auth.getUser()
   const user = data.user
   if (!user) throw new Error("sign in first")
-  if (place.id.startsWith("cloud:")) throw new Error("this place is already published")
+  if (place.id.startsWith("cloud-")) throw new Error("cloud places cannot be synced again")
 
+  const existingId = place.cloudId
   const row = mapPlaceToRow(place, user.id)
+  row.is_public = makePublic
 
   // Upload cover
   if (place.coverImageUrl?.startsWith("data:")) {
@@ -139,6 +146,7 @@ export async function publishPlace(
   }
 
   // Upload splat
+  let splatUrl: string | null = null
   if (splatBlob) {
     const ext = place.splatName?.split(".").pop() ?? "ply"
     const path = `${user.id}/${place.id}.${ext}`
@@ -146,36 +154,227 @@ export async function publishPlace(
       upsert: true,
     })
     if (error) throw new Error(`capture upload failed: ${error.message}`)
-    row.splat_url = supabase.storage.from("splats").getPublicUrl(path).data.publicUrl
+    splatUrl = supabase.storage.from("splats").getPublicUrl(path).data.publicUrl
+    row.splat_url = splatUrl
   }
 
-  const { data: inserted, error } = await supabase
-    .from("places")
-    .insert(row)
-    .select("id")
-    .single()
-  if (error) throw new Error(`publish failed: ${error.message}`)
+  let cloudId: string
+  if (existingId) {
+    const { error } = await supabase.from("places").update(row).eq("id", existingId)
+    if (error) throw new Error(`sync failed: ${error.message}`)
+    cloudId = existingId
+  } else {
+    const { data: inserted, error } = await supabase
+      .from("places")
+      .insert(row)
+      .select("id")
+      .single()
+    if (error) throw new Error(`sync failed: ${error.message}`)
+    cloudId = inserted.id as string
 
-  const cloudId = inserted.id as string
-  const memoryRows = memories
-    .filter((m) => m.mediaType !== "video" || (m.mediaUrl && m.mediaUrl.length < 1_800_000))
-    .map((m) => mapMemoryToRow(m, cloudId))
-  if (memoryRows.length) {
-    const { error: memError } = await supabase.from("memories").insert(memoryRows)
-    if (memError) throw new Error(`memories upload failed: ${memError.message}`)
+    // First sync: copy the memories over
+    const memoryRows = memories
+      .filter((m) => m.mediaType !== "video" || (m.mediaUrl && m.mediaUrl.length < 1_800_000))
+      .map((m) => mapMemoryToRow(m, cloudId))
+    if (memoryRows.length) {
+      const { error: memError } = await supabase.from("memories").insert(memoryRows)
+      if (memError) throw new Error(`memories upload failed: ${memError.message}`)
+    }
   }
 
-  return {
-    cloudId,
-    splatUrl: (row.splat_url as string) ?? null,
-  }
+  return { cloudId, splatUrl: splatUrl ?? null }
+}
+
+/** Publish (list publicly) or unpublish (keep cloud-shared, hide from archive). */
+export async function setPlacePublic(cloudId: string, isPublic: boolean): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.from("places").update({ is_public: isPublic }).eq("id", cloudId)
+  if (error) throw new Error(`update failed: ${error.message}`)
 }
 
 /** Remove a published place from the public archive (local copy stays). */
 export async function unpublishPlace(cloudId: string): Promise<void> {
+  return setPlacePublic(cloudId, false)
+}
+
+/* ---------------- Collaboration ---------------- */
+
+export interface PlaceInvite {
+  id: string
+  email: string
+  role: "contributor" | "viewer"
+  status: "pending" | "accepted" | "revoked"
+  token: string
+  createdAt: number
+}
+
+export interface PlaceCollab {
+  members: Array<{ name: string; email: string; role: "contributor" | "viewer"; userId: string }>
+  invites: PlaceInvite[]
+  isOwner: boolean
+}
+
+/** Invite someone by email: stores the invite (pending) and sends the email. */
+export async function inviteMember(
+  cloudId: string,
+  email: string,
+  role: "contributor" | "viewer",
+  placeName: string,
+  inviterName: string
+): Promise<{ emailed: boolean; acceptUrl: string | null }> {
+  const supabase = getSupabase()
+  const { data: session } = await supabase.auth.getSession()
+  const jwt = session.session?.access_token
+  if (!jwt) throw new Error("sign in first")
+
+  const { data: inserted, error } = await supabase
+    .from("place_invites")
+    .insert({ place_id: cloudId, email, role })
+    .select("token")
+    .single()
+  if (error) throw new Error(`invite failed: ${error.message}`)
+  const token = inserted.token as string
+
+  // Send the email via our API (falls back to a manual link if unconfigured)
+  const api = await fetch("/api/invite", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ to: email, placeName, inviterName, role, token }),
+  }).catch(() => null)
+
+  if (api && api.ok) return { emailed: true, acceptUrl: null }
+  const payload = api ? await api.json().catch(() => ({})) : {}
+  return { emailed: false, acceptUrl: (payload.acceptUrl as string) ?? `/invite/${token}` }
+}
+
+/** Revoke a pending invite. */
+export async function revokeInvite(inviteId: string): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase
+    .from("place_invites")
+    .update({ status: "revoked" })
+    .eq("id", inviteId)
+  if (error) throw new Error(`revoke failed: ${error.message}`)
+}
+
+/** Members + invite states for a cloud place (owner sees invites too). */
+export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
+  const supabase = getSupabase()
+  const user = (await supabase.auth.getUser()).data.user
+
+  const { data: members } = await supabase
+    .from("place_members")
+    .select("user_id, role, profiles(display_name)")
+    .eq("place_id", cloudId)
+
+  const { data: place } = await supabase
+    .from("places")
+    .select("owner_id")
+    .eq("id", cloudId)
+    .single()
+
+  const isOwner = !!user && place?.owner_id === user.id
+
+  let invites: PlaceInvite[] = []
+  if (isOwner) {
+    const { data: inv } = await supabase
+      .from("place_invites")
+      .select("id, email, role, status, token, created_at")
+      .eq("place_id", cloudId)
+      .order("created_at", { ascending: false })
+    invites = (inv ?? []).map((i: Record<string, unknown>) => ({
+      id: i.id as string,
+      email: i.email as string,
+      role: i.role as "contributor" | "viewer",
+      status: i.status as PlaceInvite["status"],
+      token: i.token as string,
+      createdAt: new Date(i.created_at as string).getTime(),
+    }))
+  }
+
+  return {
+    members: (members ?? []).map((m: Record<string, unknown>) => ({
+      userId: m.user_id as string,
+      role: m.role as "contributor" | "viewer",
+      name: ((m.profiles as Record<string, unknown> | null)?.display_name as string) || "someone",
+      email: "",
+    })),
+    invites,
+    isOwner,
+  }
+}
+
+/** Accept an invite (must be signed in with the invited email). Returns the cloud place id. */
+export async function acceptInvite(token: string): Promise<string> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.rpc("accept_invite", { p_token: token })
+  if (error) throw new Error(error.message)
+  return data as string
+}
+
+export interface InvitePreview {
+  email: string
+  role: "contributor" | "viewer"
+  status: "pending" | "accepted" | "revoked"
+  placeName: string
+  inviterName: string
+}
+
+export async function getInvitePreview(token: string): Promise<InvitePreview | null> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.rpc("get_invite_preview", { p_token: token })
+  if (error) throw new Error(error.message)
+  return (data as InvitePreview | null) ?? null
+}
+
+/** Signed-in user's cloud places — owned or shared with them (RLS-scoped). */
+export async function fetchMyCloudPlaces(): Promise<Array<PublicPlaceCard & { isPublic: boolean; ownerId: string }>> {
+  if (!isCloudConfigured()) return []
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from("places")
+    .select("id, owner_id, name, location, description, start_year, end_year, end_open, cover_url, splat_url, is_public, created_at, memories(count), place_members(count)")
+    .order("created_at", { ascending: false })
+    .limit(100)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    ownerId: r.owner_id as string,
+    name: r.name as string,
+    location: (r.location as string) ?? "",
+    description: (r.description as string) ?? "",
+    startYear: r.start_year as number,
+    endYear: r.end_year as number,
+    endOpen: (r.end_open as boolean) ?? false,
+    coverUrl: (r.cover_url as string) ?? null,
+    hasCapture: !!r.splat_url,
+    memoryCount: ((r.memories as Array<{ count: number }> | null)?.[0]?.count) ?? 0,
+    contributorCount: ((r.place_members as Array<{ count: number }> | null)?.[0]?.count) ?? 0,
+    createdAt: new Date(r.created_at as string).getTime(),
+    isPublic: (r.is_public as boolean) ?? false,
+  }))
+}
+
+/** Add a memory directly to a cloud place (owner or invited contributor). */
+export async function addCloudMemory(cloudId: string, memory: Memory): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.from("memories").insert(mapMemoryToRow(memory, cloudId))
+  if (error) throw new Error(`could not save memory: ${error.message}`)
+}
+
+/** Delete a cloud memory (owner only). memoryId may carry the "cloud:" prefix. */
+export async function deleteCloudMemory(cloudId: string, memoryId: string): Promise<void> {
+  const supabase = getSupabase()
+  const rawId = memoryId.replace(/^cloud[:\-]/, "")
+  const { error } = await supabase.from("memories").delete().eq("id", rawId).eq("place_id", cloudId)
+  if (error) throw new Error(`could not remove memory: ${error.message}`)
+}
+
+/** Permanently delete a cloud place and everything attached to it (owner only). */
+export async function deleteCloudPlace(cloudId: string): Promise<void> {
   const supabase = getSupabase()
   const { error } = await supabase.from("places").delete().eq("id", cloudId)
-  if (error) throw new Error(`unpublish failed: ${error.message}`)
+  if (error) throw new Error(`could not delete the place: ${error.message}`)
 }
 
 /* ---------------- Public directory ---------------- */
@@ -220,7 +419,7 @@ export async function fetchPublicPlaces(): Promise<PublicPlaceCard[]> {
   }))
 }
 
-/** A published place, mapped into the local viewer's shape. */
+/** A cloud place, mapped into the local viewer's shape. */
 export interface CloudPlace {
   place: Place
   memories: Memory[]
@@ -230,11 +429,11 @@ export interface CloudPlace {
 export async function fetchPublicPlace(cloudId: string): Promise<CloudPlace | null> {
   if (!isCloudConfigured()) return null
   const supabase = getSupabase()
+  // RLS scopes visibility: public, owned, or shared with the signed-in member
   const { data: p } = await supabase
     .from("places")
     .select("*")
     .eq("id", cloudId)
-    .eq("is_public", true)
     .maybeSingle()
   if (!p) return null
   const { data: mems } = await supabase

@@ -11,6 +11,8 @@ import { Nav } from "@/components/landing/atmosphere"
 import { loadPlaces, loadMemories, type Place } from "@/lib/places"
 import {
   fetchPublicPlaces,
+  fetchMyCloudPlaces,
+  getCloudUser,
   completeSignIn,
   isCloudConfigured,
   type PublicPlaceCard,
@@ -82,6 +84,7 @@ function ArchiveCard({
 
 export default function ExplorePage() {
   const [myPlaces, setMyPlaces] = useState<Place[]>([])
+  const [cloudPlaces, setCloudPlaces] = useState<Array<PublicPlaceCard & { isPublic: boolean; ownerId: string }>>([])
   const [publicPlaces, setPublicPlaces] = useState<PublicPlaceCard[] | null>(null)
   const [cloudError, setCloudError] = useState<string | null>(null)
   const cloudReady = isCloudConfigured()
@@ -96,8 +99,17 @@ export default function ExplorePage() {
       fetchPublicPlaces()
         .then(setPublicPlaces)
         .catch((e) => setCloudError(e.message))
+      getCloudUser()
+        .then(async (u) => {
+          if (!u) return
+          setCloudPlaces(await fetchMyCloudPlaces().catch(() => []))
+        })
+        .catch(() => {})
     }
   }, [cloudReady])
+
+  const localCloudIds = new Set(myPlaces.map((p) => p.cloudId).filter(Boolean))
+  const sharedCloudPlaces = cloudPlaces.filter((p) => !localCloudIds.has(p.id))
 
   return (
     <main className="min-h-[100dvh] bg-[#060607] text-neutral-200">
@@ -109,8 +121,8 @@ export default function ExplorePage() {
           The archive of places people kept.
         </h1>
 
-        {/* ---------- Your places (on this device) ---------- */}
-        {myPlaces.length > 0 && (
+        {/* ---------- Your places (on this device + shared with you) ---------- */}
+        {(myPlaces.length > 0 || sharedCloudPlaces.length > 0) && (
           <div className="mt-14">
             <div className="flex items-baseline justify-between">
               <p className="text-xs tracking-[0.35em] uppercase text-[#c9bda4]">your places</p>
@@ -133,6 +145,19 @@ export default function ExplorePage() {
                   coverUrl={p.coverImageUrl}
                   href={`/place/${p.id}`}
                   index={i}
+                />
+              ))}
+              {sharedCloudPlaces.map((p, i) => (
+                <ArchiveCard
+                  key={p.id}
+                  name={p.name}
+                  location={p.location}
+                  years={`${p.startYear}–${p.endOpen ? "Present" : p.endYear}`}
+                  memories={p.memoryCount}
+                  contributors={Math.max(1, p.contributorCount)}
+                  coverUrl={p.coverUrl}
+                  href={`/place/cloud-${p.id}`}
+                  index={myPlaces.length + i}
                 />
               ))}
             </div>

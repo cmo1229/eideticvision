@@ -17,7 +17,6 @@ import {
   deleteMemory,
   placeYears,
   savePlace,
-  addMember,
   getSplatUrl,
   getSplatBlob,
   fileToDataUrl,
@@ -32,13 +31,20 @@ import {
 } from "@/lib/places"
 import {
   fetchPublicPlace,
+  fetchCollab,
   getCloudUser,
   sendMagicLink,
   signOut,
-  publishPlace,
-  unpublishPlace,
+  syncPlaceToCloud,
+  setPlacePublic,
+  inviteMember,
+  revokeInvite,
+  addCloudMemory,
+  deleteCloudMemory,
+  deleteCloudPlace,
   isCloudConfigured,
   type CloudUser,
+  type PlaceCollab,
 } from "@/lib/cloud"
 
 /* ---------------- 3D memory marker (splat mode) ---------------- */
@@ -205,12 +211,14 @@ function Composer({
   position,
   members,
   years,
+  fixedContributor,
   onSave,
   onCancel,
 }: {
   position: MemoryPosition
   members: PlaceMember[]
   years: { min: number; max: number }
+  fixedContributor?: string
   onSave: (m: Memory) => void
   onCancel: () => void
 }) {
@@ -219,7 +227,7 @@ function Composer({
   const [story, setStory] = useState("")
   const [date, setDate] = useState(`${years.max}-06`)
   const [contributorId, setContributorId] = useState(
-    localStorage.getItem("eidetic.me") || contributors[0]?.name || ""
+    fixedContributor || localStorage.getItem("eidetic.me") || contributors[0]?.name || ""
   )
   const [mediaType, setMediaType] = useState<"image" | "video" | undefined>()
   const [mediaUrl, setMediaUrl] = useState<string | undefined>()
@@ -262,7 +270,7 @@ function Composer({
 
   const handleSave = () => {
     if (!title.trim()) return
-    localStorage.setItem("eidetic.me", contributorId)
+    if (!fixedContributor) localStorage.setItem("eidetic.me", contributorId)
     onSave({
       id: crypto.randomUUID(),
       placeId: "",
@@ -326,17 +334,21 @@ function Composer({
           </div>
           <div>
             <label className={labelCls}>contributor</label>
-            <select
-              value={contributorId}
-              onChange={(e) => setContributorId(e.target.value)}
-              className={`${inputCls} bg-[#0a0a0b] [color-scheme:dark]`}
-            >
-              {contributors.map((m) => (
-                <option key={m.id} value={m.name}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+            {fixedContributor ? (
+              <p className={`${inputCls} text-neutral-400`}>{fixedContributor}</p>
+            ) : (
+              <select
+                value={contributorId}
+                onChange={(e) => setContributorId(e.target.value)}
+                className={`${inputCls} bg-[#0a0a0b] [color-scheme:dark]`}
+              >
+                {contributors.map((m) => (
+                  <option key={m.id} value={m.name}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
@@ -385,6 +397,39 @@ function Composer({
 
 /* ---------------- Memory detail ---------------- */
 
+function DeleteMemoryButton({ onDelete }: { onDelete: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  if (!confirming) {
+    return (
+      <button
+        onClick={() => setConfirming(true)}
+        className="mt-5 text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-red-400/70 transition-colors"
+      >
+        remove this memory
+      </button>
+    )
+  }
+  return (
+    <div className="mt-5 border border-red-500/20 p-3">
+      <p className="text-[10px] text-neutral-300">Remove this memory forever?</p>
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          onClick={onDelete}
+          className="px-3 py-1.5 text-[9px] tracking-[0.2em] uppercase border border-red-400/50 text-red-300 bg-red-500/[0.08] hover:bg-red-500/[0.16] transition-colors"
+        >
+          yes, remove
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="px-3 py-1.5 text-[9px] tracking-[0.2em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 transition-colors"
+        >
+          keep it
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function MemoryDetail({
   memory,
   member,
@@ -432,14 +477,7 @@ function MemoryDetail({
           <p className="mt-4 text-xs text-neutral-400 leading-relaxed font-light">{memory.story}</p>
         )}
 
-        {onDelete && (
-          <button
-            onClick={onDelete}
-            className="mt-5 text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-red-400/70 transition-colors"
-          >
-            remove this memory
-          </button>
-        )}
+        {onDelete && <DeleteMemoryButton onDelete={onDelete} />}
       </div>
     </div>
   )
@@ -449,93 +487,199 @@ function MemoryDetail({
 
 function ContributorsPanel({
   place,
-  onUpdate,
-  readOnly = false,
+  isCloud,
+  cloudUser,
+  collab,
+  reloadCollab,
+  onEnableSharing,
+  sharing,
 }: {
   place: Place
-  onUpdate: (p: Place) => void
-  readOnly?: boolean
+  isCloud: boolean
+  cloudUser: CloudUser | null
+  collab: PlaceCollab | null
+  reloadCollab: () => Promise<void>
+  onEnableSharing: () => void
+  sharing: boolean
 }) {
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<"contributor" | "viewer">("contributor")
-  const [invited, setInvited] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [manualLink, setManualLink] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const cloudId = place.cloudId
 
-  const handleInvite = () => {
+  const handleInvite = async () => {
+    setError(null)
+    setMessage(null)
+    setManualLink(null)
     if (!email.includes("@")) {
-      setInvited("enter a valid email")
+      setError("enter a valid email")
       return
     }
-    const updated = addMember(place.id, { name: "", email, role })
-    if (updated) {
-      onUpdate(updated)
-      setInvited(email)
+    if (!cloudId) return
+    setBusy(true)
+    try {
+      const ownerName = place.members.find((m) => m.role === "owner")?.name ?? "Someone"
+      const result = await inviteMember(cloudId, email.trim(), role, place.name, ownerName)
+      if (result.emailed) {
+        setMessage(`invite sent to ${email.trim()} — it's pending until they join`)
+      } else {
+        setManualLink(result.acceptUrl ?? null)
+        setMessage(`email delivery isn't configured yet — share this link with ${email.trim()}`)
+      }
       setEmail("")
+      await reloadCollab()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "invite failed")
+    } finally {
+      setBusy(false)
     }
   }
 
+  const handleRevoke = async (inviteId: string) => {
+    if (!cloudId) return
+    try {
+      await revokeInvite(inviteId)
+      await reloadCollab()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "revoke failed")
+    }
+  }
+
+  const pendingInvites = collab?.invites.filter((i) => i.status === "pending") ?? []
+
   return (
     <div className="space-y-4">
+      {/* Members */}
       <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
         <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">contributors</p>
         <div className="mt-4 space-y-3">
-          {place.members.map((m) => (
-            <div key={m.id} className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
-                  {m.name.charAt(0).toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs text-neutral-200 truncate">{m.name}</p>
-                  {m.email && <p className="text-[10px] text-neutral-600 truncate">{m.email}</p>}
+          {place.members
+            .filter((m) => m.role === "owner" || !cloudId || collab?.members.some((cm) => cm.name === m.name))
+            .map((m) => (
+              <div key={m.id} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
+                    {m.name.charAt(0).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs text-neutral-200 truncate">{m.name}</p>
+                    {m.email && <p className="text-[10px] text-neutral-600 truncate">{m.email}</p>}
+                  </div>
                 </div>
+                <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 shrink-0">
+                  {m.role}
+                </span>
               </div>
-              <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 shrink-0">
-                {m.role}
-              </span>
-            </div>
-          ))}
+            ))}
+          {collab?.members
+            .filter((cm) => !place.members.some((m) => m.name === cm.name))
+            .map((cm) => (
+              <div key={cm.userId} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
+                    {cm.name.charAt(0).toUpperCase()}
+                  </span>
+                  <p className="text-xs text-neutral-200 truncate">{cm.name}</p>
+                </div>
+                <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 shrink-0">
+                  {cm.role}
+                </span>
+              </div>
+            ))}
         </div>
       </div>
 
-      {!readOnly && (
-      <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
-        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">invite contributor</p>
-        <div className="mt-4 space-y-3">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="email address"
-            className={inputCls}
-          />
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as "contributor" | "viewer")}
-            className={`${inputCls} bg-[#0a0a0b] [color-scheme:dark]`}
-          >
-            <option value="contributor">Contributor — can add memories</option>
-            <option value="viewer">Viewer — can only visit</option>
-          </select>
-          <button
-            onClick={handleInvite}
-            className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-200 hover:border-neutral-500 transition-colors"
-          >
-            send invite
-          </button>
-          {invited && (
-            <p className="text-[10px] text-neutral-500 leading-relaxed">
-              {invited.includes("@") ? (
-                <>
-                  Prototype behavior — the invite for <span className="text-neutral-300">{invited}</span> is
-                  stored locally. No email was sent; real delivery arrives with accounts.
-                </>
-              ) : (
-                invited
-              )}
-            </p>
-          )}
+      {/* Pending invites (owner, cloud) */}
+      {cloudId && pendingInvites.length > 0 && (
+        <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+          <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">
+            pending · {pendingInvites.length}
+          </p>
+          <div className="mt-4 space-y-3">
+            {pendingInvites.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-neutral-300 truncate">{inv.email}</p>
+                  <p className="text-[9px] tracking-[0.2em] uppercase text-[#c9bda4]/70">
+                    pending · {inv.role}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleRevoke(inv.id)}
+                  className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-red-400/70 transition-colors shrink-0"
+                >
+                  revoke
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Invite form (owner with a cloud place) */}
+      {cloudId && collab?.isOwner && (
+        <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+          <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">invite contributor</p>
+          <div className="mt-4 space-y-3">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="email address"
+              className={inputCls}
+            />
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as "contributor" | "viewer")}
+              className={`${inputCls} bg-[#0a0a0b] [color-scheme:dark]`}
+            >
+              <option value="contributor">Contributor — can add memories</option>
+              <option value="viewer">Viewer — can only visit</option>
+            </select>
+            <button
+              onClick={handleInvite}
+              disabled={busy}
+              className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+            >
+              {busy ? "sending…" : "send invite"}
+            </button>
+            {message && (
+              <p className="text-[10px] text-[#c9bda4]/90 leading-relaxed">{message}</p>
+            )}
+            {manualLink && (
+              <p className="text-[10px] text-neutral-400 break-all border border-neutral-800 p-2">
+                {typeof window !== "undefined"
+                  ? `${window.location.origin}${manualLink}`
+                  : manualLink}
+              </p>
+            )}
+            {error && <p className="text-[10px] text-red-400/80 leading-relaxed">{error}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Not yet shared — enable real collaboration */}
+      {!cloudId && !isCloud && (
+        <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+          <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">
+            real invites
+          </p>
+          <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
+            {cloudUser
+              ? "Share this place privately with people by email — they'll sign in and add their own memories to it."
+              : "Sign in, then share this place with people by email — they'll sign in and add their own memories."}
+          </p>
+          <button
+            onClick={onEnableSharing}
+            disabled={sharing}
+            className="mt-4 w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-200 hover:border-neutral-500 transition-colors disabled:opacity-40"
+          >
+            {sharing ? "preparing…" : "enable real invites"}
+          </button>
+        </div>
       )}
     </div>
   )
@@ -589,7 +733,7 @@ function PublishPanel({
     setBusy(true)
     try {
       const splatBlob = await getSplatBlob(place.id)
-      const result = await publishPlace(place, loadMemories(place.id), splatBlob)
+      const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, true)
       const updated = { ...place, cloudId: result.cloudId }
       savePlace(updated)
       onPlaceChange(updated)
@@ -607,11 +751,8 @@ function PublishPanel({
     setMessage(null)
     setBusy(true)
     try {
-      await unpublishPlace(place.cloudId)
-      const updated = { ...place, cloudId: undefined }
-      savePlace(updated)
-      onPlaceChange(updated)
-      setMessage("unpublished — the place is private again")
+      await setPlacePublic(place.cloudId, false)
+      setMessage("unpublished — no longer in the public archive, still shared with collaborators")
     } catch (e) {
       setError(e instanceof Error ? e.message : "unpublish failed")
     } finally {
@@ -778,7 +919,7 @@ function DangerZone({
     setError(null)
     try {
       if (place.cloudId) {
-        await unpublishPlace(place.cloudId).catch(() => {})
+        await deleteCloudPlace(place.cloudId).catch(() => {})
       }
       deletePlace(place.id)
       onDeleted()
@@ -847,6 +988,9 @@ export default function PlacePage() {
   const [splatUrl, setSplatUrl] = useState<string | null>(null)
   const [splatLoaded, setSplatLoaded] = useState(false)
   const [isCloud, setIsCloud] = useState(false)
+  const [cloudUser, setCloudUser] = useState<CloudUser | null>(null)
+  const [collab, setCollab] = useState<PlaceCollab | null>(null)
+  const [sharing, setSharing] = useState(false)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [picking, setPicking] = useState<MemoryPosition | null>(null)
@@ -858,8 +1002,6 @@ export default function PlacePage() {
     // Published place from the public archive — read-only visit
     if (placeId.startsWith("cloud-")) {
       const cloudId = placeId.slice("cloud-".length)
-      // Intentional mount-time state (client-only data path)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsCloud(true)
       fetchPublicPlace(cloudId).then((cp) => {
         if (!cp) {
@@ -886,6 +1028,41 @@ export default function PlacePage() {
       setSplatLoaded(true)
     })
   }, [placeId, router])
+
+  // Cloud session + collaboration. Once a place is synced, the cloud copy is
+  // the source of truth for memories (so contributors' additions show up).
+  const activeCloudId = isCloud
+    ? placeId.slice("cloud-".length)
+    : place?.cloudId ?? null
+
+  const reloadCollab = useCallback(async () => {
+    if (!activeCloudId) return
+    setCollab(await fetchCollab(activeCloudId).catch(() => null))
+  }, [activeCloudId])
+
+  useEffect(() => {
+    if (!activeCloudId) return
+    getCloudUser()
+      .then(async (u) => {
+        setCloudUser(u)
+        await reloadCollab()
+        if (u) {
+          const cp = await fetchPublicPlace(activeCloudId).catch(() => null)
+          if (cp) {
+            setMemories(cp.memories)
+            if (cp.splatUrl) setSplatUrl(cp.splatUrl)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [activeCloudId, reloadCollab])
+
+  // Write access: owner locally, or signed-in owner/contributor on the cloud copy
+  const canWrite = isCloud
+    ? !!cloudUser &&
+      (collab?.isOwner ||
+        !!collab?.members.some((m) => m.userId === cloudUser.id && m.role === "contributor"))
+    : true
 
   const years = useMemo(
     () => (place ? placeYears(place, memories) : { min: 2025, max: 2026 }),
@@ -916,8 +1093,29 @@ export default function PlacePage() {
     setSelectedId(null)
   }, [awaitingPick])
 
-  const handleSaveMemory = (m: Memory) => {
-    if (!place || isCloud) return
+  const handleSaveMemory = async (m: Memory) => {
+    if (!place) return
+
+    // Cloud place: write through to the archive (owner or invited contributor)
+    if (activeCloudId && cloudUser) {
+      const saved = { ...m, contributorId: cloudUser.displayName }
+      try {
+        await addCloudMemory(activeCloudId, saved)
+        const cp = await fetchPublicPlace(activeCloudId)
+        if (cp) setMemories(cp.memories)
+        setPicking(null)
+        setAwaitingPick(false)
+        setTimelineYear(Math.min(saved.year, years.max))
+        setPanel("memories")
+        setSelectedId(saved.id)
+      } catch (e) {
+        // error surfaced by composer? keep simple: log to console state
+        setPanel("memories")
+        console.error(e)
+      }
+      return
+    }
+
     const saved = { ...m, placeId }
     saveMemory(saved)
     setMemories(loadMemories(placeId))
@@ -1000,7 +1198,7 @@ export default function PlacePage() {
             {navItem("memories", `Memories ${memories.length > 0 ? `(${memories.length})` : ""}`)}
             {navItem("contributors", "Contributors")}
             {navItem("about", "About")}
-            {!isCloud && (
+            {canWrite && (
             <button
               onClick={() => {
                 setAwaitingPick((v) => !v)
@@ -1028,8 +1226,8 @@ export default function PlacePage() {
               splatName={place.splatName}
               splatFormat={place.splatFormat}
               loading={!splatLoaded}
-              onSurfacePick={isCloud ? undefined : handleSurfacePick}
-              onWorldPick={isCloud ? undefined : handleWorldPick}
+              onSurfacePick={canWrite ? handleSurfacePick : undefined}
+              onWorldPick={canWrite ? handleWorldPick : undefined}
               renderSceneExtras={
                 <>
                   {splatUrl &&
@@ -1095,6 +1293,7 @@ export default function PlacePage() {
                 position={picking}
                 members={place.members}
                 years={years}
+                fixedContributor={activeCloudId && cloudUser ? cloudUser.displayName : undefined}
                 onSave={handleSaveMemory}
                 onCancel={() => setPicking(null)}
               />
@@ -1123,10 +1322,21 @@ export default function PlacePage() {
                 <MemoryDetail
                   memory={selected}
                   member={place.members.find((m) => m.name === selected.contributorId)}
-                  onDelete={isCloud ? undefined : () => {
-                    setMemories(deleteMemory(selected.id, placeId))
-                    setSelectedId(null)
-                  }}
+                  onDelete={
+                    !activeCloudId || !cloudUser || !collab?.isOwner
+                      ? !activeCloudId
+                        ? () => {
+                            setMemories(deleteMemory(selected.id, placeId))
+                            setSelectedId(null)
+                          }
+                        : undefined
+                      : async () => {
+                          await deleteCloudMemory(activeCloudId, selected.id).catch(() => {})
+                          const cp = await fetchPublicPlace(activeCloudId).catch(() => null)
+                          if (cp) setMemories(cp.memories)
+                          setSelectedId(null)
+                        }
+                  }
                   onClose={() => setSelectedId(null)}
                 />
               )}
@@ -1174,10 +1384,27 @@ export default function PlacePage() {
           {!picking && panel === "contributors" && (
             <ContributorsPanel
               place={place}
-              readOnly={isCloud}
-              onUpdate={(p) => {
-                setPlace(p)
-                setMemories(loadMemories(placeId))
+              isCloud={isCloud}
+              cloudUser={cloudUser}
+              collab={collab}
+              reloadCollab={reloadCollab}
+              sharing={sharing}
+              onEnableSharing={async () => {
+                if (!cloudUser) {
+                  setPanel("about")
+                  return
+                }
+                setSharing(true)
+                try {
+                  const splatBlob = await getSplatBlob(place.id)
+                  const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, false)
+                  const updated = { ...place, cloudId: result.cloudId }
+                  savePlace(updated)
+                  setPlace(updated)
+                  await reloadCollab()
+                } finally {
+                  setSharing(false)
+                }
               }}
             />
           )}

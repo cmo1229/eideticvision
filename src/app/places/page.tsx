@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Nav } from "@/components/landing/atmosphere"
 import { loadPlaces, loadMemories, deletePlace, type Place } from "@/lib/places"
-import { unpublishPlace } from "@/lib/cloud"
+import { deleteCloudPlace } from "@/lib/cloud"
 
 export default function PlacesPage() {
   const [places, setPlaces] = useState<Place[]>([])
@@ -44,9 +44,9 @@ export default function PlacesPage() {
   const handleDelete = async (place: Place) => {
     setDeleting(true)
     try {
-      // If published, also remove it from the public archive (best effort)
+      // Remove the cloud copy (archive + collaboration) too, best effort
       if (place.cloudId) {
-        await unpublishPlace(place.cloudId).catch(() => {})
+        await deleteCloudPlace(place.cloudId).catch(() => {})
       }
       deletePlace(place.id)
       refresh()
@@ -160,7 +160,7 @@ export default function PlacesPage() {
                   </p>
                   <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
                     {p.cloudId
-                      ? "Removes the place, its memories and its capture from this device and the public archive."
+                      ? "Removes the place, its memories and its capture from this device and from the cloud (including the public archive)."
                       : "Removes the place, its memories and its capture from this device."}
                   </p>
                   <div className="mt-5 flex items-center gap-3">
