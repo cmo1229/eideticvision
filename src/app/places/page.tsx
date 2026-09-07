@@ -60,9 +60,15 @@ export default function PlacesPage() {
     <main className="min-h-screen bg-[#060607] text-neutral-200">
       <Nav active="places" />
 
-      <section className="max-w-5xl mx-auto px-6 pt-32 pb-24">
-        <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">my places</p>
-        <h1 className="mt-4 text-2xl font-extralight text-neutral-100 tracking-wide">
+      <section className="max-w-5xl mx-auto px-6 pt-28 pb-24">
+        <Link
+          href="/explore"
+          className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors"
+        >
+          ← explore
+        </Link>
+        <p className="mt-6 text-[11px] tracking-[0.4em] uppercase text-neutral-500">my places</p>
+        <h1 className="mt-4 text-3xl md:text-4xl font-light text-neutral-50 tracking-wide">
           The spatial history of your life.
         </h1>
 

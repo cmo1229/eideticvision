@@ -62,16 +62,16 @@ function ArchiveCard({
         <div className="absolute inset-0 bg-gradient-to-t from-[#060607] via-transparent to-transparent" />
       </div>
       <div className="p-5">
-        <h3 className="text-sm text-neutral-100 font-light">{name}</h3>
+        <h3 className="text-base text-neutral-50 font-light">{name}</h3>
         {location && (
-          <p className="mt-1 text-[10px] tracking-[0.25em] uppercase text-neutral-500">{location}</p>
+          <p className="mt-1.5 text-[11px] tracking-[0.25em] uppercase text-neutral-400">{location}</p>
         )}
-        <p className="mt-1 text-[10px] tracking-[0.25em] uppercase text-neutral-600">{years}</p>
+        <p className="mt-1 text-[11px] tracking-[0.25em] uppercase text-neutral-500">{years}</p>
         <div className="mt-4 flex items-center justify-between">
-          <p className="text-[10px] tracking-[0.2em] uppercase text-neutral-500">
+          <p className="text-[11px] tracking-[0.2em] uppercase text-neutral-400">
             {memories} memories · {contributors} voice{contributors !== 1 ? "s" : ""}
           </p>
-          <span className="text-[9px] tracking-[0.25em] uppercase text-neutral-600 group-hover:text-[#e8e2d4] transition-colors">
+          <span className="text-[10px] tracking-[0.25em] uppercase text-neutral-500 group-hover:text-[#f5efe2] transition-colors">
             enter →
           </span>
         </div>
@@ -103,20 +103,20 @@ export default function ExplorePage() {
     <main className="min-h-[100dvh] bg-[#060607] text-neutral-200">
       <Nav active="explore" />
 
-      <section className="max-w-5xl mx-auto px-6 pt-32 pb-24">
-        <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">explore</p>
-        <h1 className="mt-4 text-2xl font-extralight text-neutral-100 tracking-wide">
+      <section className="max-w-5xl mx-auto px-6 pt-28 pb-24">
+        <p className="text-[11px] tracking-[0.4em] uppercase text-neutral-500">explore</p>
+        <h1 className="mt-4 text-3xl md:text-4xl font-light text-neutral-50 tracking-wide">
           The archive of places people kept.
         </h1>
 
         {/* ---------- Your places (on this device) ---------- */}
         {myPlaces.length > 0 && (
-          <div className="mt-12">
+          <div className="mt-14">
             <div className="flex items-baseline justify-between">
-              <p className="text-[10px] tracking-[0.35em] uppercase text-[#c9bda4]/80">your places</p>
+              <p className="text-xs tracking-[0.35em] uppercase text-[#c9bda4]">your places</p>
               <Link
                 href="/places"
-                className="text-[9px] tracking-[0.25em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors"
+                className="text-[10px] tracking-[0.25em] uppercase text-neutral-400 hover:text-neutral-200 transition-colors"
               >
                 manage →
               </Link>
@@ -141,16 +141,16 @@ export default function ExplorePage() {
 
         {/* ---------- The public archive ---------- */}
         <div className="mt-20">
-          <p className="text-[10px] tracking-[0.35em] uppercase text-[#c9bda4]/80">
+          <p className="text-xs tracking-[0.35em] uppercase text-[#c9bda4]">
             the public archive
           </p>
 
           {!cloudReady && (
-            <div className="mt-6 border border-dashed border-neutral-800 p-12 text-center">
-              <p className="text-sm text-neutral-300 font-light">
+            <div className="mt-7 border border-dashed border-neutral-800 p-12 text-center">
+              <p className="text-base text-neutral-200 font-light">
                 The public archive opens when the archive backend is connected.
               </p>
-              <p className="mt-3 text-xs text-neutral-600 leading-relaxed max-w-md mx-auto">
+              <p className="mt-3 text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
                 Places are private on this device until then. When the archive opens, you&apos;ll be
                 able to publish a place — its rooms, its memories, its voices — for anyone to walk
                 through.
@@ -159,25 +159,25 @@ export default function ExplorePage() {
           )}
 
           {cloudReady && publicPlaces === null && !cloudError && (
-            <p className="mt-6 text-xs tracking-[0.3em] uppercase text-neutral-600">
+            <p className="mt-7 text-xs tracking-[0.3em] uppercase text-neutral-500">
               opening the archive…
             </p>
           )}
 
           {cloudError && (
-            <div className="mt-6 border border-dashed border-neutral-800 p-12 text-center">
-              <p className="text-xs text-neutral-500 leading-relaxed">
+            <div className="mt-7 border border-dashed border-neutral-800 p-12 text-center">
+              <p className="text-sm text-neutral-400 leading-relaxed">
                 The archive could not be reached ({cloudError}).
               </p>
             </div>
           )}
 
           {publicPlaces !== null && publicPlaces.length === 0 && (
-            <div className="mt-6 border border-dashed border-neutral-800 p-12 text-center">
-              <p className="text-sm text-neutral-300 font-light">
+            <div className="mt-7 border border-dashed border-neutral-800 p-12 text-center">
+              <p className="text-base text-neutral-200 font-light">
                 Nothing published yet.
               </p>
-              <p className="mt-3 text-xs text-neutral-600 leading-relaxed max-w-md mx-auto">
+              <p className="mt-3 text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
                 Open one of your places, sign in, and publish it — the rooms, the memories, and
                 everyone&apos;s voices stay together.
               </p>

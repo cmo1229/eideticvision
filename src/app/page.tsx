@@ -108,21 +108,23 @@ export default function Page() {
             </Link>
           </div>
 
-          <p
-            className="mt-8 text-[10px] tracking-[0.3em] uppercase"
-            style={{
-              opacity: mounted ? 1 : 0,
-              transition: "opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.9s",
-            }}
-          >
-            <span className="text-neutral-600">featured · </span>
-            <Link
-              href={featuredHref}
-              className="text-violet-300/80 hover:text-violet-200 transition-colors"
+          {studioExists && (
+            <p
+              className="mt-8 text-[10px] tracking-[0.3em] uppercase"
+              style={{
+                opacity: mounted ? 1 : 0,
+                transition: "opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.9s",
+              }}
             >
-              Studio Apartment — Claremont, California · 2025–2026 →
-            </Link>
-          </p>
+              <span className="text-neutral-600">featured · </span>
+              <Link
+                href={featuredHref}
+                className="text-violet-300/80 hover:text-violet-200 transition-colors"
+              >
+                Studio Apartment — Claremont, California · 2025–2026 →
+              </Link>
+            </p>
+          )}
         </div>
       </section>
 
