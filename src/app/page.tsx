@@ -1,179 +1,194 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { FloatingOrbs, NoiseOverlay, Nav } from "@/components/landing/atmosphere"
+import Link from "next/link"
+import { Nav } from "@/components/landing/atmosphere"
+import { SEED_PLACE_ID } from "@/lib/places"
 
-const PATHS = [
+const IDEAS = [
   {
-    tag: "i have a scan",
-    title: "Upload your splat",
-    body: "Made one with Scaniverse or another capture app? Drop it in. It renders in seconds.",
-    cta: "Create a Place",
-    href: "/create",
-    icon: "◈",
-    featured: true,
+    n: "01",
+    title: "Preserve the place",
+    body: "A meaningful real-world place, captured in 3D and kept navigable — the rooms, the light, the way it actually was.",
   },
   {
-    tag: "help me make one",
-    title: "Capture it yourself in 10 minutes",
-    body: "A phone is all it takes. We walk you through it, step by step — no experience needed.",
-    cta: "See the guide",
-    href: "/preserve",
-    icon: "◎",
+    n: "02",
+    title: "Add the memories",
+    body: "Stories, photos, videos, recordings — each attached to the exact spot where it happened. The place itself becomes the archive.",
   },
   {
-    tag: "do it for me",
-    title: "Professional preservation",
-    body: "Selling the house tomorrow? We capture it properly, clean it, and set up the archive with your family.",
-    cta: "Learn more",
-    href: "/preserve#service",
-    icon: "✦",
+    n: "03",
+    title: "Invite the people",
+    body: "Everyone who remembers it can contribute. Different perspectives, same rooms — the whole history of a place, kept together.",
+  },
+  {
+    n: "04",
+    title: "Move through time",
+    body: "Drag the timeline and watch the place's history unfold. What was added, and when. The years stay in order; the memories stay put.",
   },
 ]
 
-const STEPS = [
-  { n: "01", title: "create a place", body: "Name it. Set its years. This is the vessel — Grandma's House, 1978–2026." },
-  { n: "02", title: "capture the space", body: "Walk the rooms once with a phone. The scan becomes a walkable 3D memory." },
-  { n: "03", title: "gather the memories", body: "Pin photos, stories and voices to exact spots. Everyone who remembers, contributes." },
+const STUDIO_PINS = [
+  { x: 0.24, y: 0.42, label: "First Night Here" },
+  { x: 0.55, y: 0.36, label: "Late Night Dinner" },
+  { x: 0.76, y: 0.55, label: "The Desk" },
 ]
 
 export default function Page() {
   const [mounted, setMounted] = useState(false)
-  const [seen, setSeen] = useState(false)
+  const [studioExists, setStudioExists] = useState(false)
   useEffect(() => {
+    // Intentional mount-time state (avoids hydration mismatch, enables entry animation)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
-    const obs = new IntersectionObserver(([e]) => e.isIntersecting && setSeen(true), { threshold: 0.2 })
-    const el = document.getElementById("how")
-    if (el) obs.observe(el)
-    return () => obs.disconnect()
+    try {
+      const places = JSON.parse(localStorage.getItem("eidetic.places.v3") ?? "[]")
+      setStudioExists(places.some((p: { id: string }) => p.id === SEED_PLACE_ID))
+    } catch {}
   }, [])
 
+  const exploreHref = studioExists ? `/place/${SEED_PLACE_ID}` : "/places"
+
   return (
-    <main className="min-h-screen bg-[#030305] text-neutral-200 selection:bg-violet-500/30">
+    <main className="min-h-screen bg-[#060607] text-neutral-200">
       <Nav />
 
-      {/* Hero — the three paths ARE the hero choice */}
-      <section className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden py-28">
-        <div className="absolute inset-0 z-0">
-          <video autoPlay muted loop playsInline preload="auto" className="w-full h-full object-cover">
-            <source src="/background.mp4" type="video/mp4" />
-          </video>
-        </div>
-        <div className="absolute inset-0 z-[1] bg-black/80" />
-        <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#030305] via-[#030305]/50 to-[#030305]/70" />
-        <FloatingOrbs />
-        <NoiseOverlay />
-
+      {/* Hero */}
+      <section className="min-h-screen flex flex-col items-center justify-center px-6 pt-24 pb-16 relative">
         <div
-          className="relative z-10 flex flex-col items-center px-6 w-full max-w-5xl text-center"
+          className="relative z-10 flex flex-col items-center text-center max-w-3xl"
           style={{
             opacity: mounted ? 1 : 0,
-            transform: mounted ? "translateY(0)" : "translateY(20px)",
-            transition: "all 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s",
+            transform: mounted ? "translateY(0)" : "translateY(16px)",
+            transition: "all 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.1s",
           }}
         >
-          <h1 className="text-4xl md:text-6xl font-extralight tracking-[-0.02em] leading-[1.05]">
-            <span className="text-neutral-100 font-light">Keep the places you</span>
+          <h1 className="text-4xl md:text-6xl font-extralight tracking-[-0.02em] leading-[1.08] text-neutral-100">
+            Keep the places you
             <br />
-            <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent font-light">
-              can&apos;t keep forever.
-            </span>
+            can&apos;t keep forever.
           </h1>
 
-          <p className="mt-7 text-neutral-300 text-sm md:text-base font-light leading-relaxed max-w-xl">
-            Turn meaningful places into{" "}
-            <span className="text-neutral-100">collaborative spatial archives</span> — preserve
-            the space in 3D, attach the stories, photos and voices to{" "}
-            <span className="text-neutral-100">where they happened</span>, and move through its
-            history with a timeline.
+          <p className="mt-7 text-neutral-400 text-sm md:text-base font-light leading-relaxed max-w-xl">
+            Preserve a meaningful place in 3D. Add the stories that happened there. Invite the
+            people who remember it. Explore its history through time.
           </p>
 
-          <p className="mt-10 text-[10px] tracking-[0.4em] uppercase text-neutral-400">
-            choose how you&apos;ll begin
-          </p>
-
-          {/* The three paths */}
-          <div className="mt-6 w-full grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
-            {PATHS.map((p, i) => (
-              <a
-                key={p.tag}
-                href={p.href}
-                className={`group flex flex-col p-7 backdrop-blur-sm transition-all duration-500 border ${
-                  p.featured
-                    ? "border-violet-500/50 bg-violet-500/[0.08] hover:bg-violet-500/[0.15] hover:border-violet-400/70"
-                    : "border-neutral-700/50 bg-black/40 hover:bg-black/60 hover:border-neutral-500/60"
-                }`}
-                style={{
-                  opacity: mounted ? 1 : 0,
-                  transform: mounted ? "translateY(0)" : "translateY(24px)",
-                  transition: `all 1s cubic-bezier(0.16, 1, 0.3, 1) ${300 + i * 150}ms`,
-                }}
-              >
-                <span className={`text-lg ${p.featured ? "text-violet-300" : "text-neutral-400"}`}>{p.icon}</span>
-                <span className="mt-4 text-[9px] tracking-[0.3em] uppercase text-violet-300/80">{p.tag}</span>
-                <h2 className="mt-2 text-base text-neutral-100 font-light leading-snug">{p.title}</h2>
-                <p className="mt-3 text-xs text-neutral-400 leading-relaxed flex-1">{p.body}</p>
-                <span className={`mt-5 text-[10px] tracking-[0.25em] uppercase ${p.featured ? "text-violet-200" : "text-neutral-300 group-hover:text-violet-300"} transition-colors`}>
-                  {p.cta} →
-                </span>
-              </a>
-            ))}
+          <div className="mt-10 flex flex-col sm:flex-row items-center gap-4">
+            <Link
+              href={exploreHref}
+              className="px-8 py-3.5 text-[11px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all"
+            >
+              Explore a Place
+            </Link>
+            <Link
+              href="/create"
+              className="px-8 py-3.5 text-[11px] tracking-[0.3em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 transition-all"
+            >
+              Create a Place
+            </Link>
           </div>
+        </div>
+
+        {/* Featured place preview */}
+        <div
+          className="relative z-10 mt-20 w-full max-w-4xl"
+          style={{
+            opacity: mounted ? 1 : 0,
+            transform: mounted ? "translateY(0)" : "translateY(24px)",
+            transition: "all 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.4s",
+          }}
+        >
+          <Link
+            href={exploreHref}
+            className="group block border border-neutral-900 hover:border-neutral-700 transition-colors"
+          >
+            <div className="relative aspect-[21/9] bg-[#08080a] overflow-hidden">
+              {/* archival frame — an honest preview, not a fake capture */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <p className="text-[9px] tracking-[0.4em] uppercase text-neutral-600">
+                    featured place
+                  </p>
+                  <p className="mt-3 text-lg font-extralight text-neutral-300 tracking-wide">
+                    Studio Apartment
+                  </p>
+                  <p className="mt-1.5 text-[9px] tracking-[0.3em] uppercase text-neutral-600">
+                    Claremont, California · 2025–2026
+                  </p>
+                </div>
+              </div>
+              {/* memory pins, waiting where they were left */}
+              {STUDIO_PINS.map((p) => (
+                <span
+                  key={p.label}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
+                  style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#c9bda4]/80 group-hover:bg-[#f5efe2] transition-colors" />
+                  <span className="mt-2 text-[8px] tracking-[0.2em] uppercase text-neutral-700 group-hover:text-neutral-500 transition-colors">
+                    {p.label}
+                  </span>
+                </span>
+              ))}
+              <div className="absolute bottom-4 right-5 text-[9px] tracking-[0.3em] uppercase text-neutral-600 group-hover:text-neutral-400 transition-colors">
+                enter the place →
+              </div>
+            </div>
+          </Link>
         </div>
       </section>
 
-      {/* How it works */}
-      <section id="how" className="max-w-5xl mx-auto px-6 py-28">
-        <div className="text-center mb-20">
-          <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-500">how it works</p>
-          <h2 className="mt-5 text-2xl md:text-3xl font-extralight tracking-[-0.01em] leading-snug text-neutral-200">
-            A place becomes a{" "}
-            <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent">
-              memory
-            </span>{" "}
-            in three quiet steps.
-          </h2>
-        </div>
-
-        <div className="flex flex-col md:flex-row gap-0">
-          {STEPS.map((s, i) => (
-            <div
-              key={s.n}
-              className="flex-1 p-8"
-              style={{
-                opacity: seen ? 1 : 0,
-                transform: seen ? "translateY(0)" : "translateY(20px)",
-                transition: `all 0.9s cubic-bezier(0.16, 1, 0.3, 1) ${i * 200}ms`,
-              }}
-            >
-              <span className="text-sm font-extralight tracking-[0.2em] text-violet-300/80">{s.n}</span>
-              <h3 className="mt-5 text-[13px] font-light tracking-[0.2em] uppercase text-neutral-100">{s.title}</h3>
-              <p className="mt-4 text-[13px] font-light leading-loose text-neutral-400">{s.body}</p>
+      {/* The four ideas */}
+      <section className="max-w-5xl mx-auto px-6 py-28">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-16">
+          {IDEAS.map((idea) => (
+            <div key={idea.n}>
+              <span className="text-[10px] tracking-[0.3em] text-[#c9bda4]/70 tabular-nums">
+                {idea.n}
+              </span>
+              <h2 className="mt-4 text-sm font-light tracking-[0.15em] uppercase text-neutral-100">
+                {idea.title}
+              </h2>
+              <p className="mt-3 text-[13px] font-light leading-loose text-neutral-500">
+                {idea.body}
+              </p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Closing */}
-      <section className="max-w-2xl mx-auto px-6 pb-40 text-center">
-        <p className="text-xl font-extralight text-neutral-200 leading-loose">
-          Every place holds its people.
-          <br />
-          Every person holds their memories.
-          <br />
-          <span className="bg-gradient-to-r from-violet-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent">
-            Nothing should be lost just because the house is gone.
-          </span>
+      {/* One use case */}
+      <section className="max-w-2xl mx-auto px-6 py-24 text-center">
+        <p className="text-[10px] tracking-[0.4em] uppercase text-neutral-600">for example</p>
+        <p className="mt-8 text-xl md:text-2xl font-extralight text-neutral-300 leading-loose">
+          Your grandmother&apos;s house was sold last spring. The kitchen table where every holiday
+          happened is gone.
+          <span className="text-neutral-500"> The stories don&apos;t have to be.</span>
         </p>
-        <div className="mt-12 flex items-center justify-center gap-3">
-          <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-500">space</span>
+        <p className="mt-8 text-xs text-neutral-500 leading-relaxed font-light max-w-md mx-auto">
+          Capture the house before it changes hands. Pin the stories to the rooms they belong to.
+          Let everyone who lived there add what they remember.
+        </p>
+      </section>
+
+      {/* Final CTA */}
+      <section className="max-w-2xl mx-auto px-6 pb-40 text-center">
+        <div className="flex items-center justify-center gap-3 mb-14">
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">place</span>
           <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-500">people</span>
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">memories</span>
           <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-500">memories</span>
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">people</span>
           <span className="w-1 h-1 rounded-full bg-neutral-700" />
-          <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-500">time</span>
+          <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">time</span>
         </div>
+        <Link
+          href={exploreHref}
+          className="inline-block px-10 py-4 text-[11px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all"
+        >
+          Explore a Place
+        </Link>
       </section>
     </main>
   )

@@ -1,431 +1,566 @@
 "use client"
 
+/* ------------------------------------------------------------------ */
+/*  Place page — the most important page in the product.               */
+/*  PLACE + MEMORIES + PEOPLE + TIME                                   */
+/* ------------------------------------------------------------------ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { Canvas, useThree, useFrame } from "@react-three/fiber"
-import { OrbitControls } from "@react-three/drei"
-import { parseSplatFile, parseSpzFile, splatKind } from "@/lib/splat"
-import { parseGsPly, gsOrient } from "@/lib/gs-ply"
-import * as THREE from "three"
+import SpatialViewer from "@/components/viewer/spatial-viewer"
 import { Nav } from "@/components/landing/atmosphere"
-import { RetentionBar } from "@/components/ui/progress"
-import { MOODS, getMood, type MoodId } from "@/lib/moods"
-import { EffectComposer, Bloom, Vignette, HueSaturation } from "@react-three/postprocessing"
 import {
   getPlace,
-  getSplatBlob,
-  loadPins,
-  savePin,
-  deletePin,
+  loadMemories,
+  saveMemory,
+  deleteMemory,
   placeYears,
   savePlace,
+  addMember,
+  getSplatUrl,
   fileToDataUrl,
+  fileToMediaDataUrl,
+  formatMemoryDate,
   exportPlace,
   importPlace,
   type Place,
-  type MemoryPin,
+  type PlaceMember,
+  type Memory,
+  type MemoryPosition,
 } from "@/lib/places"
 
-/* ------------------------------------------------------------------ */
-/*  Point cloud — the splat canvas                                      */
-/* ------------------------------------------------------------------ */
+/* ---------------- 3D memory marker (splat mode) ---------------- */
 
-function makeDemoGeometry(): THREE.BufferGeometry {
-  // A small house interior so the pin flow works without a scan
-  const pos: number[] = []
-  const col: number[] = []
-  const c = new THREE.Color()
-  const push = (x: number, y: number, z: number, color: string) => {
-    pos.push(x, y, z)
-    c.set(color)
-    col.push(c.r, c.g, c.b)
-  }
-  // floor 12x12
-  for (let i = 0; i < 5000; i++) {
-    push((Math.random() - 0.5) * 12, 0, (Math.random() - 0.5) * 12, "#4a3f33")
-  }
-  // walls
-  for (let i = 0; i < 3500; i++) {
-    const t = (Math.random() - 0.5) * 12
-    const h = Math.random() * 4
-    push(t, h, -6, "#5a5468")
-    push(t, h, 6, "#544e60")
-    push(-6, h, t, "#504a5c")
-    push(6, h, t, "#5e5870")
-  }
-  // ceiling
-  for (let i = 0; i < 2500; i++) {
-    push((Math.random() - 0.5) * 12, 4, (Math.random() - 0.5) * 12, "#3a3644")
-  }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
-  geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
-  return geo
-}
-
-function SplatPoints({
-  blob,
-  splatName,
-  onPick,
-  isEmpty,
-}: {
-  blob: Blob | null
-  splatName?: string
-  onPick: (p: [number, number, number]) => void
-  isEmpty: boolean
-}) {
-  const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const { raycaster } = useThree()
-
-  useEffect(() => {
-    raycaster.params.Points = { threshold: 0.12 }
-  }, [raycaster])
-
-  useEffect(() => {
-    if (isEmpty) {
-      setGeometry(makeDemoGeometry())
-      return
-    }
-    if (!blob) return
-    setError(null)
-    let cancelled = false
-
-    const kind = splatKind(splatName)
-
-    ;(async () => {
-      try {
-        if (kind === "spz") {
-          const buf = await blob.arrayBuffer()
-          if (cancelled) return
-          setGeometry(await parseSpzFile(buf))
-        } else if (kind === "splat") {
-          const buf = await blob.arrayBuffer()
-          if (cancelled) return
-          setGeometry(parseSplatFile(buf))
-        } else {
-          // Our own 3DGS PLY parser: reads f_dc/opacity that PLYLoader drops
-          const buf = await blob.arrayBuffer()
-          if (cancelled) return
-          const data = parseGsPly(buf)
-          // 3DGS signature = f_dc/opacity/scale properties → deterministic flip
-          const is3dgs = data.hasOpacity || data.hasSH
-          gsOrient(data.positions, is3dgs)
-
-          // Cull invisible splats rather than showing white ghosts
-          const visible: number[] = []
-          const visColors: number[] = []
-          for (let i = 0; i < data.count; i++) {
-            if (data.alphas[i] < 0.15) continue
-            visible.push(data.positions[i*3], data.positions[i*3+1], data.positions[i*3+2])
-            visColors.push(data.colors[i*3], data.colors[i*3+1], data.colors[i*3+2])
-          }
-          const geo = new THREE.BufferGeometry()
-          geo.setAttribute("position", new THREE.Float32BufferAttribute(visible, 3))
-          geo.setAttribute("color", new THREE.Float32BufferAttribute(visColors, 3))
-          geo.computeBoundingBox()
-          const center = new THREE.Vector3()
-          geo.boundingBox!.getCenter(center)
-          geo.translate(-center.x, -center.y, -center.z)
-
-          // Auto point size from the cloud's physical extent
-          const ext = new THREE.Vector3()
-          geo.boundingBox!.getSize(ext)
-          const maxDim = Math.max(ext.x, ext.y, ext.z)
-          ;(geo as unknown as { userData: { pointSize: number } }).userData.pointSize =
-            Math.max(0.008, Math.min(0.06, maxDim / 420))
-
-          setGeometry(geo)
-        }
-      } catch {
-        if (!cancelled) setError("could not read this splat file")
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [blob, splatName, isEmpty])
-
-  if (error) return <p className="text-red-400/70 text-xs p-8">{error}</p>
-  if (!geometry) return null
-  return <LiveCloud geometry={geometry} onPick={onPick} />
-}
-
-/* ------------------------------------------------------------------ */
-/*  LiveCloud — styling, motion, tour                                   */
-/* ------------------------------------------------------------------ */
-
-function LiveCloud({
-  geometry,
-  onPick,
-}: {
-  geometry: THREE.BufferGeometry
-  onPick: (p: [number, number, number]) => void
-}) {
-  const ref = useRef<THREE.Points>(null!)
-  const pointSize = (geometry as unknown as { userData?: { pointSize?: number } }).userData?.pointSize ?? 0.02
-
-  // Ambient motion: the memory breathes — gentle organic sway
-  useFrame(() => {
-    if (!ref.current) return
-    const t = Date.now() * 0.0004
-    ref.current.rotation.z = Math.sin(t) * 0.0016
-    ref.current.position.y = Math.sin(t * 1.3) * 0.014
-  })
-
-  return (
-    <points
-      ref={ref}
-      geometry={geometry}
-      onClick={(e) => {
-        e.stopPropagation()
-        onPick([e.point.x, e.point.y, e.point.z])
-      }}
-    >
-      <pointsMaterial size={pointSize} vertexColors sizeAttenuation />
-    </points>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/*  TourCamera — cinematic guided float through the place               */
-/* ------------------------------------------------------------------ */
-
-function TourCamera({ active, radius }: { active: boolean; radius: number }) {
-  const { camera } = useThree()
-  const t = useRef(0)
-
-  useFrame((_, delta) => {
-    if (!active) return
-    t.current += delta * 0.14
-    const time = t.current
-    const r = radius
-    // Slow orbit with vertical breathing and gentle look drift
-    const x = Math.sin(time) * r
-    const z = Math.cos(time) * r
-    const y = 1.4 + Math.sin(time * 0.45) * 0.9
-    camera.position.lerp(new THREE.Vector3(x, y, z), 0.02)
-    camera.lookAt(
-      Math.sin(time * 0.6) * r * 0.12,
-      1.1 + Math.sin(time * 0.3) * 0.35,
-      Math.cos(time * 0.35) * 0.4
-    )
-  })
-
-  return null
-}
-
-/* ------------------------------------------------------------------ */
-/*  Mood post-processing over the splat                                 */
-/* ------------------------------------------------------------------ */
-
-function PlaceEffects({ mood }: { mood: MoodId }) {
-  const m = getMood(mood)
-  return (
-    <EffectComposer enableNormalPass={false} multisampling={0}>
-      <Bloom
-        luminanceThreshold={m.bloom.threshold}
-        luminanceSmoothing={m.bloom.smoothing}
-        intensity={m.bloom.intensity * 0.7}
-        width={480}
-      />
-      <HueSaturation hue={m.hue} saturation={m.saturation} />
-      <Vignette offset={m.vignette.offset} darkness={m.vignette.darkness} />
-    </EffectComposer>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/*  Pin markers                                                         */
-/* ------------------------------------------------------------------ */
-
-function PinMarker({
-  pin,
+function WorldPin({
+  position,
   active,
   onSelect,
 }: {
-  pin: MemoryPin
+  position: MemoryPosition
   active: boolean
   onSelect: () => void
 }) {
-  const ref = useRef<THREE.Mesh>(null!)
-  const hasPhoto = !!pin.photo
-
-  useFrame(() => {
-    if (!ref.current) return
-    const t = Date.now() * 0.003
-    const s = active ? 1.5 + Math.sin(t) * 0.25 : 1
-    ref.current.scale.setScalar(s)
-  })
-
   return (
     <mesh
-      ref={ref}
-      position={pin.pos}
+      position={[position.x, position.y, position.z]}
       onClick={(e) => {
         e.stopPropagation()
         onSelect()
       }}
     >
-      <sphereGeometry args={[0.055, 12, 12]} />
+      <sphereGeometry args={[0.05, 12, 12]} />
       <meshStandardMaterial
-        color={hasPhoto ? "#e879f9" : "#a78bfa"}
-        emissive={hasPhoto ? "#e879f9" : "#a78bfa"}
-        emissiveIntensity={active ? 2.2 : 1.1}
+        color={active ? "#f5efe2" : "#c9bda4"}
+        emissive={active ? "#f5efe2" : "#8a8066"}
+        emissiveIntensity={active ? 1.6 : 0.5}
       />
     </mesh>
   )
 }
 
-/* ------------------------------------------------------------------ */
-/*  Memory composer + card                                              */
-/* ------------------------------------------------------------------ */
+/* ---------------- HTML memory marker (no-capture mode) ---------------- */
+
+function SurfacePin({
+  memory,
+  active,
+  onSelect,
+}: {
+  memory: Memory
+  active: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      data-pin
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect()
+      }}
+      className="absolute z-10 group -translate-x-1/2 -translate-y-1/2"
+      style={{
+        left: `${memory.position.x * 100}%`,
+        top: `${memory.position.y * 100}%`,
+        transition: "opacity 700ms ease, transform 700ms ease",
+      }}
+      aria-label={memory.title}
+    >
+      <span
+        className={`block rounded-full border transition-all duration-300 ${
+          active
+            ? "w-3.5 h-3.5 bg-[#f5efe2] border-[#f5efe2] shadow-[0_0_12px_rgba(245,239,226,0.5)]"
+            : "w-2.5 h-2.5 bg-[#c9bda4]/90 border-[#c9bda4] group-hover:scale-125 group-hover:bg-[#f5efe2]"
+        }`}
+      />
+      <span
+        className={`absolute left-1/2 -translate-x-1/2 top-full mt-2 whitespace-nowrap text-[9px] tracking-[0.2em] uppercase px-2 py-1 bg-black/70 backdrop-blur-sm transition-opacity duration-300 ${
+          active ? "text-neutral-100 opacity-100" : "text-neutral-400 opacity-0 group-hover:opacity-100"
+        }`}
+      >
+        {memory.title}
+      </span>
+    </button>
+  )
+}
+
+/* ---------------- Timeline ---------------- */
+
+function Timeline({
+  min,
+  max,
+  value,
+  memoryYears,
+  onChange,
+}: {
+  min: number
+  max: number
+  value: number
+  memoryYears: Set<number>
+  onChange: (year: number) => void
+}) {
+  const span = Math.max(1, max - min)
+  const ticks: number[] = []
+  for (let y = min; y <= max; y++) ticks.push(y)
+
+  return (
+    <div className="px-4 sm:px-10 pt-5 pb-3">
+      <div className="relative h-10">
+        {/* track */}
+        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-neutral-800" />
+        {/* progress */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 h-px bg-[#c9bda4]/70"
+          style={{ left: 0, width: `${((value - min) / span) * 100}%` }}
+        />
+        {/* ticks */}
+        {ticks.map((y) => (
+          <button
+            key={y}
+            onClick={() => onChange(y)}
+            className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 group py-3 px-1.5"
+            style={{ left: `${((y - min) / span) * 100}%` }}
+            aria-label={`Jump to ${y}`}
+          >
+            <span
+              className={`block mx-auto transition-all duration-300 ${
+                memoryYears.has(y)
+                  ? "w-px h-3.5 bg-[#c9bda4]"
+                  : "w-px h-1.5 bg-neutral-700 group-hover:bg-neutral-500"
+              }`}
+            />
+            {memoryYears.has(y) && (
+              <span className="absolute top-0 left-1/2 -translate-x-1/2 text-[8px] tracking-widest text-[#c9bda4]/70 tabular-nums">
+                {String(y).slice(2)}
+              </span>
+            )}
+          </button>
+        ))}
+        {/* handle */}
+        <div
+          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-[left] duration-150"
+          style={{ left: `${((value - min) / span) * 100}%` }}
+        >
+          <div className="w-3 h-3 rounded-full bg-[#f5efe2] shadow-[0_0_14px_rgba(245,239,226,0.35)]" />
+        </div>
+        {/* invisible native range for interaction */}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize"
+          aria-label="Timeline"
+        />
+      </div>
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 tabular-nums">{min}</span>
+        <span className="text-[11px] tracking-[0.3em] uppercase text-[#e8e2d4] tabular-nums">{value}</span>
+        <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 tabular-nums">{max}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Memory composer ---------------- */
 
 const inputCls =
-  "w-full bg-transparent border-b border-neutral-800/60 px-1 py-2 text-xs text-neutral-300 placeholder:text-neutral-700 focus:outline-none focus:border-violet-500/40 transition-colors"
+  "w-full bg-transparent border-b border-neutral-800 px-1 py-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#c9bda4]/50 transition-colors"
+const labelCls = "block text-[9px] tracking-[0.3em] uppercase text-neutral-500"
 
 function Composer({
-  pos,
+  position,
+  members,
   years,
-  placeId,
-  onDone,
+  onSave,
+  onCancel,
 }: {
-  pos: [number, number, number]
+  position: MemoryPosition
+  members: PlaceMember[]
   years: { min: number; max: number }
-  placeId: string
-  onDone: (pin: MemoryPin) => void
+  onSave: (m: Memory) => void
+  onCancel: () => void
 }) {
+  const contributors = members.filter((m) => m.role === "owner" || m.role === "contributor")
   const [title, setTitle] = useState("")
   const [story, setStory] = useState("")
-  const [year, setYear] = useState(years.max)
-  const [contributor, setContributor] = useState("")
-  const [photo, setPhoto] = useState<string | undefined>()
-  const [saving, setSaving] = useState(false)
-  const photoRef = useRef<HTMLInputElement>(null)
+  const [date, setDate] = useState(`${years.max}-06`)
+  const [contributorId, setContributorId] = useState(
+    localStorage.getItem("eidetic.me") || contributors[0]?.name || ""
+  )
+  const [mediaType, setMediaType] = useState<"image" | "video" | undefined>()
+  const [mediaUrl, setMediaUrl] = useState<string | undefined>()
+  const [audioUrl, setAudioUrl] = useState<string | undefined>()
+  const [error, setError] = useState<string | null>(null)
+  const mediaRef = useRef<HTMLInputElement>(null)
+  const audioRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    setContributor(localStorage.getItem("eidetic.me") ?? "")
-  }, [])
+  const year = Number(date.slice(0, 4)) || years.max
 
-  const handleSave = async () => {
+  const handleMedia = async (f: File | undefined) => {
+    if (!f) return
+    setError(null)
+    try {
+      if (f.type.startsWith("image/")) {
+        setMediaType("image")
+        setMediaUrl(await fileToDataUrl(f, 900))
+      } else if (f.type.startsWith("video/")) {
+        setMediaType("video")
+        setMediaUrl(await fileToMediaDataUrl(f))
+      } else {
+        setError("images and video are supported here")
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "could not read file")
+      setMediaType(undefined)
+      setMediaUrl(undefined)
+    }
+  }
+
+  const handleAudio = async (f: File | undefined) => {
+    if (!f) return
+    setError(null)
+    try {
+      setAudioUrl(await fileToMediaDataUrl(f))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "could not read file")
+    }
+  }
+
+  const handleSave = () => {
     if (!title.trim()) return
-    setSaving(true)
-    localStorage.setItem("eidetic.me", contributor.trim())
-    const pin: MemoryPin = {
+    localStorage.setItem("eidetic.me", contributorId)
+    onSave({
       id: crypto.randomUUID(),
-      placeId,
+      placeId: "",
+      contributorId: contributorId || "someone",
       title: title.trim(),
       story: story.trim(),
-      year: Math.round(year),
-      contributor: contributor.trim() || "someone",
-      photo,
-      pos,
+      date,
+      year: Math.min(years.max, Math.max(years.min, year)),
+      mediaType,
+      mediaUrl,
+      audioUrl,
+      position,
       createdAt: Date.now(),
-    }
-    savePin(pin)
-    onDone(pin)
+    })
   }
 
   return (
-    <div className="border border-violet-500/30 bg-[#0a0a14]/95 p-5">
-      <p className="text-[9px] tracking-[0.3em] uppercase text-violet-400/70">
-        new memory · pinned at this spot
-      </p>
+    <div className="border border-[#c9bda4]/25 bg-[#0a0a0b]/95 p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-[9px] tracking-[0.3em] uppercase text-[#c9bda4]/80">new memory</p>
+        <button
+          onClick={onCancel}
+          className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors"
+        >
+          cancel
+        </button>
+      </div>
+
       <div className="mt-4 space-y-4">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="what happened here?"
-          className={inputCls}
-          autoFocus
-        />
-        <textarea
-          value={story}
-          onChange={(e) => setStory(e.target.value)}
-          placeholder="the story, if there is one…"
-          rows={3}
-          className={`${inputCls} resize-none`}
-        />
-        <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>title</label>
           <input
-            type="number"
-            value={year}
-            min={years.min}
-            max={years.max}
-            onChange={(e) => setYear(Number(e.target.value))}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What happened here?"
             className={inputCls}
-          />
-          <input
-            value={contributor}
-            onChange={(e) => setContributor(e.target.value)}
-            placeholder="who remembers?"
-            className={inputCls}
+            autoFocus
           />
         </div>
-        <button
-          onClick={() => photoRef.current?.click()}
-          className="w-full border border-dashed border-neutral-800/60 hover:border-violet-500/40 transition-colors py-3 text-[10px] tracking-[0.2em] uppercase text-neutral-600"
-        >
-          {photo ? "✓ photo attached" : "+ attach a photo"}
-        </button>
-        <input
-          ref={photoRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={async (e) => {
-            const f = e.target.files?.[0]
-            if (f) setPhoto(await fileToDataUrl(f, 800))
-          }}
-        />
+        <div>
+          <label className={labelCls}>story</label>
+          <textarea
+            value={story}
+            onChange={(e) => setStory(e.target.value)}
+            placeholder="Tell it the way you remember it…"
+            rows={3}
+            className={`${inputCls} resize-none`}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>date</label>
+            <input
+              type="month"
+              value={date}
+              min={`${years.min}-01`}
+              max={`${years.max}-12`}
+              onChange={(e) => setDate(e.target.value)}
+              className={`${inputCls} [color-scheme:dark]`}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>contributor</label>
+            <select
+              value={contributorId}
+              onChange={(e) => setContributorId(e.target.value)}
+              className={`${inputCls} bg-[#0a0a0b] [color-scheme:dark]`}
+            >
+              {contributors.map((m) => (
+                <option key={m.id} value={m.name}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => mediaRef.current?.click()}
+            className="border border-dashed border-neutral-800 hover:border-[#c9bda4]/40 transition-colors py-3 text-[9px] tracking-[0.2em] uppercase text-neutral-500"
+          >
+            {mediaUrl ? "media attached ✓" : "+ photo or video"}
+          </button>
+          <button
+            onClick={() => audioRef.current?.click()}
+            className="border border-dashed border-neutral-800 hover:border-[#c9bda4]/40 transition-colors py-3 text-[9px] tracking-[0.2em] uppercase text-neutral-500"
+          >
+            {audioUrl ? "audio attached ✓" : "+ audio recording"}
+          </button>
+          <input
+            ref={mediaRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={(e) => handleMedia(e.target.files?.[0])}
+          />
+          <input
+            ref={audioRef}
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            onChange={(e) => handleAudio(e.target.files?.[0])}
+          />
+        </div>
+
+        {error && <p className="text-[10px] text-red-400/80">{error}</p>}
+
         <button
           onClick={handleSave}
-          disabled={!title.trim() || saving}
-          className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-violet-500/40 text-violet-200 bg-violet-500/[0.06] hover:bg-violet-500/[0.14] transition-all disabled:opacity-40"
+          disabled={!title.trim()}
+          className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
         >
-          {saving ? "pinning…" : "pin the memory"}
+          pin the memory
         </button>
       </div>
     </div>
   )
 }
 
-function MemoryCard({
-  pin,
+/* ---------------- Memory detail ---------------- */
+
+function MemoryDetail({
+  memory,
+  member,
   onDelete,
+  onClose,
 }: {
-  pin: MemoryPin
+  memory: Memory
+  member?: PlaceMember
   onDelete: () => void
+  onClose: () => void
 }) {
   return (
-    <div className="border border-neutral-800/60 bg-[#0a0a14]/95 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-neutral-200 font-light">{pin.title}</p>
-          <p className="mt-1 text-[9px] tracking-[0.25em] uppercase text-violet-400/60">
-            {pin.year} · {pin.contributor}
-          </p>
+    <div className="border border-neutral-800/70 bg-[#0a0a0b]/95">
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm text-neutral-100 font-light">{memory.title}</h3>
+            <p className="mt-1.5 text-[9px] tracking-[0.25em] uppercase text-neutral-500">
+              {formatMemoryDate(memory.date)} · {memory.contributorId}
+              {member?.role === "owner" ? " · owner" : ""}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors shrink-0"
+          >
+            close
+          </button>
         </div>
+
+        {memory.mediaType === "image" && memory.mediaUrl && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={memory.mediaUrl}
+            alt={memory.title}
+            className="mt-4 w-full border border-neutral-800/60 object-cover"
+          />
+        )}
+        {memory.mediaType === "video" && memory.mediaUrl && (
+          <video src={memory.mediaUrl} controls className="mt-4 w-full border border-neutral-800/60" />
+        )}
+        {memory.audioUrl && <audio src={memory.audioUrl} controls className="mt-4 w-full" />}
+
+        {memory.story && (
+          <p className="mt-4 text-xs text-neutral-400 leading-relaxed font-light">{memory.story}</p>
+        )}
+
         <button
           onClick={onDelete}
-          className="text-[9px] tracking-[0.2em] uppercase text-neutral-800 hover:text-red-400/70 transition-colors shrink-0"
+          className="mt-5 text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-red-400/70 transition-colors"
         >
-          forget
+          remove this memory
         </button>
       </div>
-      {pin.photo && (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={pin.photo} alt={pin.title} className="mt-3 w-full object-cover" />
-      )}
-      {pin.story && <p className="mt-3 text-xs text-neutral-500 leading-relaxed">{pin.story}</p>}
     </div>
   )
 }
 
-/* ------------------------------------------------------------------ */
-/*  Page                                                                */
-/* ------------------------------------------------------------------ */
+/* ---------------- Contributors panel ---------------- */
+
+function ContributorsPanel({
+  place,
+  onUpdate,
+}: {
+  place: Place
+  onUpdate: (p: Place) => void
+}) {
+  const [email, setEmail] = useState("")
+  const [role, setRole] = useState<"contributor" | "viewer">("contributor")
+  const [invited, setInvited] = useState<string | null>(null)
+
+  const handleInvite = () => {
+    if (!email.includes("@")) {
+      setInvited("enter a valid email")
+      return
+    }
+    const updated = addMember(place.id, { name: "", email, role })
+    if (updated) {
+      onUpdate(updated)
+      setInvited(email)
+      setEmail("")
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">contributors</p>
+        <div className="mt-4 space-y-3">
+          {place.members.map((m) => (
+            <div key={m.id} className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
+                  {m.name.charAt(0).toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-neutral-200 truncate">{m.name}</p>
+                  {m.email && <p className="text-[10px] text-neutral-600 truncate">{m.email}</p>}
+                </div>
+              </div>
+              <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 shrink-0">
+                {m.role}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">invite contributor</p>
+        <div className="mt-4 space-y-3">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="email address"
+            className={inputCls}
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as "contributor" | "viewer")}
+            className={`${inputCls} bg-[#0a0a0b] [color-scheme:dark]`}
+          >
+            <option value="contributor">Contributor — can add memories</option>
+            <option value="viewer">Viewer — can only visit</option>
+          </select>
+          <button
+            onClick={handleInvite}
+            className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-200 hover:border-neutral-500 transition-colors"
+          >
+            send invite
+          </button>
+          {invited && (
+            <p className="text-[10px] text-neutral-500 leading-relaxed">
+              {invited.includes("@") ? (
+                <>
+                  Prototype behavior — the invite for <span className="text-neutral-300">{invited}</span> is
+                  stored locally. No email was sent; real delivery arrives with accounts.
+                </>
+              ) : (
+                invited
+              )}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- About panel ---------------- */
+
+function AboutPanel({ place }: { place: Place }) {
+  return (
+    <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5 space-y-4">
+      <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">about this place</p>
+      {place.description && (
+        <p className="text-xs text-neutral-400 leading-relaxed font-light">{place.description}</p>
+      )}
+      <div className="pt-2 space-y-2 text-[10px] tracking-[0.15em] uppercase">
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-600">location</span>
+          <span className="text-neutral-400 text-right">{place.location || "—"}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-600">years</span>
+          <span className="text-neutral-400 text-right">
+            {place.startYear}–{place.endOpen ? "Present" : place.endYear}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-600">privacy</span>
+          <span className="text-neutral-400 text-right">private</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-neutral-600">spatial capture</span>
+          <span className="text-neutral-400 text-right">
+            {place.hasSplat
+              ? `${place.splatName ?? "file"} — rendering ${place.splatRenderingReady === false ? "integration pending" : "ready"}`
+              : "not connected yet"}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Page ---------------- */
+
+type Panel = "memories" | "contributors" | "about"
 
 export default function PlacePage() {
   const params = useParams()
@@ -433,15 +568,15 @@ export default function PlacePage() {
   const placeId = params.id as string
 
   const [place, setPlace] = useState<Place | null>(null)
-  const [splatBlob, setSplatBlob] = useState<Blob | null>(null)
-  const [pins, setPins] = useState<MemoryPin[]>([])
-  const [picking, setPicking] = useState<[number, number, number] | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [timeline, setTimeline] = useState<number | null>(null)
-  const [loaded, setLoaded] = useState(false)
-  const [mood, setMood] = useState<MoodId>("lucid")
-  const [touring, setTouring] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [memories, setMemories] = useState<Memory[]>([])
+  const [splatUrl, setSplatUrl] = useState<string | null>(null)
+  const [splatLoaded, setSplatLoaded] = useState(false)
+  const [panel, setPanel] = useState<Panel | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [picking, setPicking] = useState<MemoryPosition | null>(null)
+  const [awaitingPick, setAwaitingPick] = useState(false)
+  const [timelineYear, setTimelineYear] = useState<number | null>(null)
+  const importRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const p = getPlace(placeId)
@@ -449,31 +584,69 @@ export default function PlacePage() {
       router.push("/places")
       return
     }
+    // Intentional mount-time load from localStorage (client-only data)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlace(p)
-    setPins(loadPins(placeId))
-    getSplatBlob(placeId).then((b) => {
-      setSplatBlob(b)
-      setLoaded(true)
+    setMemories(loadMemories(placeId))
+    getSplatUrl(placeId).then((url) => {
+      setSplatUrl(url)
+      setSplatLoaded(true)
     })
   }, [placeId, router])
 
-  const years = useMemo(() => (place ? placeYears(place, pins) : { min: 1900, max: 2026 }), [place, pins])
-  const sliderYear = timeline ?? years.max
-  const visiblePins = pins.filter((m) => m.year <= sliderYear)
-
-  const handleAddPin = useCallback(
-    (pin: MemoryPin) => {
-      setPins(loadPins(placeId))
-      setPicking(null)
-      setSelected(pin.id)
-      if (place && !place.contributors.includes(pin.contributor)) {
-        const updated = { ...place, contributors: [...place.contributors, pin.contributor] }
-        savePlace(updated)
-        setPlace(updated)
-      }
-    },
-    [placeId, place]
+  const years = useMemo(
+    () => (place ? placeYears(place, memories) : { min: 2025, max: 2026 }),
+    [place, memories]
   )
+  const sliderYear = timelineYear ?? years.max
+  const visibleMemories = useMemo(
+    () =>
+      memories
+        .filter((m) => m.year <= sliderYear)
+        .sort((a, b) => a.year - b.year || a.createdAt - b.createdAt),
+    [memories, sliderYear]
+  )
+  const memoryYears = useMemo(() => new Set(memories.map((m) => m.year)), [memories])
+  const selected = visibleMemories.find((m) => m.id === selectedId) ?? null
+
+  const handleSurfacePick = useCallback((pos: MemoryPosition) => {
+    if (!awaitingPick) return
+    setPicking(pos)
+    setAwaitingPick(false)
+    setSelectedId(null)
+  }, [awaitingPick])
+
+  const handleWorldPick = useCallback((pos: MemoryPosition) => {
+    if (!awaitingPick) return
+    setPicking(pos)
+    setAwaitingPick(false)
+    setSelectedId(null)
+  }, [awaitingPick])
+
+  const handleSaveMemory = (m: Memory) => {
+    if (!place) return
+    const saved = { ...m, placeId }
+    saveMemory(saved)
+    setMemories(loadMemories(placeId))
+    setPicking(null)
+    setAwaitingPick(false)
+    // Make the new memory visible immediately, wherever the timeline was
+    setTimelineYear(Math.min(saved.year, years.max))
+    setPanel("memories")
+    // Contributor who added a memory becomes a member if they weren't one
+    if (!place.members.some((mem) => mem.name === saved.contributorId)) {
+      const updated: Place = {
+        ...place,
+        members: [
+          ...place.members,
+          { id: crypto.randomUUID(), name: saved.contributorId, role: "contributor" },
+        ],
+      }
+      savePlace(updated)
+      setPlace(updated)
+    }
+    setSelectedId(saved.id)
+  }
 
   const handleExport = () => {
     const json = exportPlace(placeId)
@@ -488,232 +661,270 @@ export default function PlacePage() {
 
   const handleImport = async (f: File | undefined) => {
     if (!f) return
-    const text = await f.text()
-    const p = importPlace(text)
+    const p = importPlace(await f.text())
     if (p && p.id === placeId) {
-      setPins(loadPins(placeId))
       setPlace(p)
+      setMemories(loadMemories(placeId))
     }
   }
 
   if (!place) {
     return (
-      <main className="min-h-screen bg-[#030305] text-neutral-500">
+      <main className="min-h-screen bg-[#060607] text-neutral-500">
         <Nav />
-        <div className="pt-40 text-center text-xs tracking-[0.3em] uppercase">loading the place…</div>
+        <div className="pt-40 text-center text-xs tracking-[0.3em] uppercase">opening the place…</div>
       </main>
     )
   }
 
+  const navItem = (id: Panel, label: string) => (
+    <button
+      key={id}
+      onClick={() => setPanel(panel === id ? null : id)}
+      className={`text-[10px] tracking-[0.25em] uppercase transition-colors ${
+        panel === id ? "text-[#e8e2d4]" : "text-neutral-500 hover:text-neutral-300"
+      }`}
+    >
+      {label}
+    </button>
+  )
+
   return (
-    <main className="min-h-screen bg-[#030305] text-neutral-200 selection:bg-violet-500/30">
+    <main className="min-h-screen bg-[#060607] text-neutral-200">
       <Nav />
 
-      <section className="max-w-7xl mx-auto px-6 pt-20 pb-16">
-        {/* Header */}
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-          <div>
-            <button
-              onClick={() => router.push("/places")}
-              className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors"
-            >
-              ← my places
-            </button>
-            <h1 className="mt-2 text-xl font-extralight text-neutral-200 tracking-wide">{place.name}</h1>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 mt-1">
-              {place.startYear}–{place.endYear} · {place.contributors.length} contributor
-              {place.contributors.length !== 1 ? "s" : ""} · {pins.length} memories · private
+      {/* Header: identity left, navigation right */}
+      <header className="fixed top-14 inset-x-0 z-40 bg-[#060607]/85 backdrop-blur-sm border-b border-neutral-900">
+        <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between gap-6">
+          <div className="min-w-0">
+            <h1 className="text-sm font-light text-neutral-100 tracking-wide truncate">{place.name}</h1>
+            <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500 mt-0.5 truncate">
+              {place.location} · {place.startYear}–{place.endOpen ? "Present" : place.endYear}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <nav className="flex items-center gap-4 sm:gap-6 shrink-0">
+            {navItem("memories", `Memories ${memories.length > 0 ? `(${memories.length})` : ""}`)}
+            {navItem("contributors", "Contributors")}
+            {navItem("about", "About")}
             <button
-              onClick={handleExport}
-              className="text-[9px] tracking-[0.25em] uppercase text-neutral-600 hover:text-neutral-400 border border-neutral-800/60 px-4 py-2 transition-colors"
+              onClick={() => {
+                setAwaitingPick((v) => !v)
+                setSelectedId(null)
+              }}
+              className={`text-[10px] tracking-[0.25em] uppercase px-4 py-2 border transition-all ${
+                awaitingPick
+                  ? "border-[#f5efe2]/60 text-[#f5efe2] bg-[#c9bda4]/[0.15]"
+                  : "border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12]"
+              }`}
             >
-              export memories
+              {awaitingPick ? "choose a spot…" : "+ Add Memory"}
             </button>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="text-[9px] tracking-[0.25em] uppercase text-neutral-600 hover:text-neutral-400 border border-neutral-800/60 px-4 py-2 transition-colors"
-            >
-              import
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={(e) => handleImport(e.target.files?.[0])}
-            />
-          </div>
+          </nav>
         </div>
+      </header>
 
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* 3D canvas */}
-          <div className="flex-1 min-w-0">
-            <div className="relative w-full h-[68vh] border border-neutral-800/30 bg-[#030305] overflow-hidden">
-              {!loaded && (
-                <RetentionBar
-                  phase="opening the place"
-                  subtext={place.hasSplat ? "unpacking the scan" : undefined}
-                  estimatedMs={place.hasSplat ? 12000 : 3000}
-                />
-              )}
-
-              <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#030305" }}>
-                <ambientLight intensity={0.7} />
-                <SplatPoints
-                  blob={splatBlob}
-                  splatName={place.splatName}
-                  isEmpty={!splatBlob && loaded}
-                  onPick={(p) => {
-                    if (touring) return
-                    setPicking(p)
-                    setSelected(null)
-                  }}
-                />
-                {visiblePins.map((pin) => (
-                  <PinMarker
-                    key={pin.id}
-                    pin={pin}
-                    active={selected === pin.id}
+      <div className="pt-30 flex flex-col h-screen">
+        {/* Viewer — the place is visually dominant */}
+        <div className="flex-1 min-h-0 px-4 sm:px-6 pt-4">
+          <div className="relative w-full h-full border border-neutral-900">
+            <SpatialViewer
+              splatUrl={splatUrl}
+              splatName={place.splatName}
+              splatFormat={place.splatFormat}
+              loading={!splatLoaded}
+              onSurfacePick={handleSurfacePick}
+              onWorldPick={handleWorldPick}
+              renderSceneExtras={
+                <>
+                  {splatUrl &&
+                    visibleMemories.map((m) => (
+                      <WorldPin
+                        key={m.id}
+                        position={m.position}
+                        active={selectedId === m.id}
+                        onSelect={() => {
+                          setSelectedId(selectedId === m.id ? null : m.id)
+                          setPicking(null)
+                          setPanel("memories")
+                        }}
+                      />
+                    ))}
+                </>
+              }
+            >
+              {/* HTML overlay markers for the no-capture mode */}
+              {!splatUrl &&
+                visibleMemories.map((m) => (
+                  <SurfacePin
+                    key={m.id}
+                    memory={m}
+                    active={selectedId === m.id}
                     onSelect={() => {
-                      if (touring) return
-                      setSelected(pin.id === selected ? null : pin.id)
+                      setSelectedId(selectedId === m.id ? null : m.id)
                       setPicking(null)
+                      setPanel("memories")
                     }}
                   />
                 ))}
-                <PlaceEffects mood={mood} />
-                <TourCamera active={touring} radius={5} />
-                <OrbitControls makeDefault enablePan={!touring} enableZoom={!touring} enabled={!touring} minDistance={0.5} maxDistance={30} />
-              </Canvas>
 
-              {/* Live feel + tour bar */}
-              <div className="absolute top-3 left-3 flex items-center gap-1 z-10">
-                {MOODS.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => setMood(m.id)}
-                    className={`px-2.5 py-1 text-[9px] tracking-[0.2em] uppercase backdrop-blur-sm border transition-all ${
-                      mood === m.id
-                        ? "border-violet-400/60 text-violet-200 bg-black/60"
-                        : "border-transparent text-neutral-600 hover:text-neutral-300 bg-black/30"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-
-              <button
-                onClick={() => setTouring((v) => !v)}
-                className={`absolute top-3 right-3 z-10 px-4 py-1.5 text-[9px] tracking-[0.25em] uppercase backdrop-blur-sm border transition-all ${
-                  touring
-                    ? "border-amber-400/60 text-amber-200 bg-amber-500/20"
-                    : "border-neutral-700/60 text-neutral-400 hover:text-neutral-200 bg-black/40"
-                }`}
-              >
-                {touring ? "◉ touring — click to stop" : "▶ tour the place"}
-              </button>
-
-              {picking && (
-                <div className="absolute top-4 right-4 text-[9px] tracking-[0.3em] uppercase text-violet-300/80 bg-black/60 px-3 py-1.5 backdrop-blur-sm">
-                  spot chosen — name the memory
+              {/* Picking hint */}
+              {(awaitingPick || picking) && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 text-[9px] tracking-[0.3em] uppercase text-[#e8e2d4] bg-black/70 px-4 py-2 backdrop-blur-sm pointer-events-none">
+                  click a spot in the place to pin the memory
                 </div>
               )}
-
-              <p className="absolute bottom-3 left-4 text-[9px] tracking-[0.3em] uppercase text-neutral-800">
-                click anywhere in the space to pin a memory
-              </p>
-            </div>
-
-            {/* Timeline */}
-            <div className="mt-6 px-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">
-                  {place.startYear}
-                </span>
-                <span className="text-[11px] tracking-[0.3em] uppercase text-violet-300/80 tabular-nums">
-                  {sliderYear}
-                </span>
-                <span className="text-[9px] tracking-[0.3em] uppercase text-neutral-600">
-                  {place.endYear}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={years.min}
-                max={years.max}
-                value={sliderYear}
-                onChange={(e) => setTimeline(Number(e.target.value))}
-                className="w-full accent-violet-400 cursor-pointer"
-              />
-              <p className="mt-2 text-center text-[9px] tracking-[0.3em] uppercase text-neutral-700">
-                {visiblePins.length} memor{visiblePins.length === 1 ? "y" : "ies"} by {sliderYear}
-              </p>
-            </div>
+            </SpatialViewer>
           </div>
+        </div>
 
-          {/* Side panel */}
-          <div className="w-full lg:w-96 shrink-0 space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-            {picking && (
+        {/* Persistent timeline at the bottom */}
+        <div className="shrink-0 border-t border-neutral-900 bg-[#060607]">
+          <Timeline
+            min={years.min}
+            max={years.max}
+            value={sliderYear}
+            memoryYears={memoryYears}
+            onChange={setTimelineYear}
+          />
+        </div>
+      </div>
+
+      {/* Side panel — memories / contributors / about / composer */}
+      {(panel || picking || awaitingPick) && (
+        <aside className="fixed right-0 top-30 bottom-0 z-40 w-full sm:w-[380px] bg-[#060607]/95 backdrop-blur-md border-l border-neutral-900 overflow-y-auto p-5 space-y-4">
+          {picking && (
+            <div className="space-y-3">
               <Composer
-                pos={picking}
+                position={picking}
+                members={place.members}
                 years={years}
-                placeId={placeId}
-                onDone={handleAddPin}
+                onSave={handleSaveMemory}
+                onCancel={() => setPicking(null)}
               />
-            )}
+              <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 text-center">
+                pinned at {(picking.x * 100).toFixed(0)}%, {(picking.y * 100).toFixed(0)}%
+                {splatUrl ? " of the space" : " of the frame — re-anchor once capture is connected"}
+              </p>
+            </div>
+          )}
 
-            {selected && (
-              <MemoryCard
-                pin={pins.find((m) => m.id === selected)!}
-                onDelete={() => {
-                  setPins(deletePin(selected, placeId))
-                  setSelected(null)
-                }}
-              />
-            )}
+          {awaitingPick && !picking && (
+            <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+              <p className="text-[9px] tracking-[0.3em] uppercase text-[#c9bda4]/80">
+                where did it happen?
+              </p>
+              <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
+                Click the spot in the place where this memory belongs. You can also cancel from the
+                Add Memory button.
+              </p>
+            </div>
+          )}
 
-            {!picking && !selected && (
-              <div className="border border-neutral-800/40 p-5">
-                <p className="text-[10px] tracking-[0.3em] uppercase text-neutral-600">
-                  {visiblePins.length === 0 ? "the first memory" : `${visiblePins.length} memories`}
+          {!picking && panel === "memories" && (
+            <>
+              {selected && (
+                <MemoryDetail
+                  memory={selected}
+                  member={place.members.find((m) => m.name === selected.contributorId)}
+                  onDelete={() => {
+                    setMemories(deleteMemory(selected.id, placeId))
+                    setSelectedId(null)
+                  }}
+                  onClose={() => setSelectedId(null)}
+                />
+              )}
+              <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+                <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">
+                  {visibleMemories.length === 0
+                    ? "no memories yet"
+                    : `${visibleMemories.length} memor${visibleMemories.length === 1 ? "y" : "ies"} by ${sliderYear}`}
                 </p>
-                {visiblePins.length === 0 ? (
-                  <p className="mt-3 text-xs text-neutral-500 leading-relaxed">
-                    Click a spot in the space — the kitchen table, the porch steps — and pin the
-                    first story to it.
+                {visibleMemories.length === 0 ? (
+                  <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
+                    {memories.length > 0
+                      ? "Nothing recorded before this point in time. Move the timeline forward."
+                      : "Click Add Memory, choose a spot in the place, and pin the first story to it."}
                   </p>
                 ) : (
-                  <div className="mt-4 space-y-3">
-                    {[...visiblePins]
-                      .sort((a, b) => b.year - a.year)
-                      .map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => setSelected(m.id === selected ? null : m.id)}
-                          className={`block w-full text-left p-3 border transition-colors ${
-                            selected === m.id
-                              ? "border-violet-500/40 bg-violet-500/[0.05]"
-                              : "border-neutral-800/50 hover:border-neutral-700/60"
-                          }`}
-                        >
-                          <p className="text-xs text-neutral-300">{m.title}</p>
-                          <p className="mt-1 text-[9px] tracking-[0.25em] uppercase text-neutral-600">
-                            {m.year} · {m.contributor}
-                            {m.photo ? " · 📷" : ""}
-                          </p>
-                        </button>
-                      ))}
+                  <div className="mt-4 space-y-2">
+                    {[...visibleMemories].reverse().map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          setSelectedId(m.id === selectedId ? null : m.id)
+                          setPicking(null)
+                        }}
+                        className={`block w-full text-left p-3 border transition-colors ${
+                          selectedId === m.id
+                            ? "border-[#c9bda4]/40 bg-[#c9bda4]/[0.05]"
+                            : "border-neutral-800/60 hover:border-neutral-700"
+                        }`}
+                      >
+                        <p className="text-xs text-neutral-200 font-light">{m.title}</p>
+                        <p className="mt-1 text-[9px] tracking-[0.2em] uppercase text-neutral-500">
+                          {formatMemoryDate(m.date)} · {m.contributorId}
+                          {m.mediaUrl ? " · media" : ""}
+                          {m.audioUrl ? " · audio" : ""}
+                        </p>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-      </section>
+            </>
+          )}
+
+          {!picking && panel === "contributors" && (
+            <ContributorsPanel
+              place={place}
+              onUpdate={(p) => {
+                setPlace(p)
+                setMemories(loadMemories(placeId))
+              }}
+            />
+          )}
+
+          {!picking && panel === "about" && (
+            <>
+              <AboutPanel place={place} />
+              <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+                <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">archive data</p>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleExport}
+                    className="py-3 text-[9px] tracking-[0.25em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 transition-colors"
+                  >
+                    export
+                  </button>
+                  <button
+                    onClick={() => importRef.current?.click()}
+                    className="py-3 text-[9px] tracking-[0.25em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 transition-colors"
+                  >
+                    import
+                  </button>
+                </div>
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept="application/json"
+                  className="hidden"
+                  onChange={(e) => handleImport(e.target.files?.[0])}
+                />
+                <p className="mt-3 text-[10px] text-neutral-600 leading-relaxed">
+                  Memories export as JSON — a bridge for moving this archive to another device or,
+                  later, to shared storage.
+                </p>
+              </div>
+              <button
+                onClick={() => router.push("/places")}
+                className="w-full text-left text-[10px] tracking-[0.3em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors px-1"
+              >
+                ← back to my places
+              </button>
+            </>
+          )}
+        </aside>
+      )}
     </main>
   )
 }
