@@ -190,14 +190,25 @@ export default function CreatePage() {
                 </span>
               ) : (
                 <span className="text-xs text-neutral-500 font-light leading-relaxed">
-                  Attach a Gaussian splat captured with Scaniverse or another capture app — .ply,
-                  .splat, .spz or .sog. The archive works without one.
+                  Attach a Gaussian splat captured with Scaniverse or another capture app — .spz
+                  recommended (.ply, .splat and .sog also work). The archive works without one.
                 </span>
               )}
             </button>
+            <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Capturing with Scaniverse? Share → Export →{" "}
+              <span className="text-[#c9bda4]/90">SPZ</span> — the same scan at 5–10× smaller, and
+              well under the 50 MB upload limit. Large .ply files won't fit.
+            </p>
             {splatFile && splatFile.name.toLowerCase().endsWith(".sog") && (
               <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
                 .sog files render in the place viewer.
+              </p>
+            )}
+            {splatFile && splatFile.size > 49_500_000 && (
+              <p className="mt-2 text-[10px] text-red-400/80 leading-relaxed">
+                This file is {(splatFile.size / 1024 / 1024).toFixed(1)} MB — over the 50 MB
+                upload limit. Export it as .spz from your capture app instead.
               </p>
             )}
             <input
