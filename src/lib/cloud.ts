@@ -192,6 +192,33 @@ export async function setPlacePublic(cloudId: string, isPublic: boolean): Promis
   if (error) throw new Error(`update failed: ${error.message}`)
 }
 
+/** Update a cloud place's details (owner only). */
+export async function updateCloudPlace(
+  cloudId: string,
+  fields: {
+    name: string
+    location: string
+    description: string
+    startYear: number
+    endYear: number
+    endOpen: boolean
+  }
+): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase
+    .from("places")
+    .update({
+      name: fields.name,
+      location: fields.location,
+      description: fields.description,
+      start_year: fields.startYear,
+      end_year: fields.endYear,
+      end_open: fields.endOpen,
+    })
+    .eq("id", cloudId)
+  if (error) throw new Error(`update failed: ${error.message}`)
+}
+
 /** Remove a published place from the public archive (local copy stays). */
 export async function unpublishPlace(cloudId: string): Promise<void> {
   return setPlacePublic(cloudId, false)

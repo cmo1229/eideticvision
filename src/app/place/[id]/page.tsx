@@ -36,6 +36,7 @@ import {
   sendMagicLink,
   signOut,
   syncPlaceToCloud,
+  updateCloudPlace,
   setPlacePublic,
   inviteMember,
   revokeInvite,
@@ -850,16 +851,154 @@ function PublishPanel({
 function AboutPanel({
   place,
   isCloud,
+  cloudUser,
   onPlaceChange,
 }: {
   place: Place
   isCloud: boolean
+  cloudUser: CloudUser | null
   onPlaceChange: (p: Place) => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState(place.name)
+  const [location, setLocation] = useState(place.location)
+  const [description, setDescription] = useState(place.description)
+  const [startYear, setStartYear] = useState(place.startYear)
+  const [endYear, setEndYear] = useState(place.endYear)
+  const [endOpen, setEndOpen] = useState(place.endOpen)
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      setError("the place needs a name")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+    const updated: Place = {
+      ...place,
+      name: name.trim(),
+      location: location.trim(),
+      description: description.trim(),
+      startYear: Math.min(startYear, endYear),
+      endYear: Math.max(startYear, endYear),
+      endOpen,
+    }
+    savePlace(updated)
+    onPlaceChange(updated)
+    try {
+      if (place.cloudId && cloudUser) {
+        await updateCloudPlace(place.cloudId, {
+          name: updated.name,
+          location: updated.location,
+          description: updated.description,
+          startYear: updated.startYear,
+          endYear: updated.endYear,
+          endOpen: updated.endOpen,
+        })
+      }
+      setEditing(false)
+      setMessage(null)
+    } catch (e) {
+      setMessage("saved on this device — the cloud copy couldn't be updated right now")
+      setError(null)
+      console.error(e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <>
     <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5 space-y-4">
-      <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">about this place</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">about this place</p>
+        {!isCloud && !editing && (
+          <button
+            onClick={() => setEditing(true)}
+            className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors"
+          >
+            edit details
+          </button>
+        )}
+        {editing && (
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors"
+          >
+            cancel
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls}>place name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>location</label>
+            <input
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="Newton, Massachusetts"
+              className={inputCls}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>from</label>
+              <input
+                type="number"
+                value={startYear}
+                onChange={(e) => setStartYear(Number(e.target.value))}
+                className={`${inputCls} [color-scheme:dark]`}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>to</label>
+              <input
+                type="number"
+                value={endYear}
+                disabled={endOpen}
+                onChange={(e) => setEndYear(Number(e.target.value))}
+                className={`${inputCls} [color-scheme:dark] disabled:opacity-30`}
+              />
+              <label className="mt-2 flex items-center gap-2 text-[9px] tracking-[0.2em] uppercase text-neutral-500 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={endOpen}
+                  onChange={(e) => setEndOpen(e.target.checked)}
+                  className="accent-[#c9bda4]"
+                />
+                present
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className={`${inputCls} resize-none`}
+            />
+          </div>
+          {error && <p className="text-[10px] text-red-400/80">{error}</p>}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+          >
+            {saving ? "saving…" : "save details"}
+          </button>
+        </div>
+      ) : (
+        <>
       {place.description && (
         <p className="text-xs text-neutral-400 leading-relaxed font-light">{place.description}</p>
       )}
@@ -889,6 +1028,8 @@ function AboutPanel({
           </span>
         </div>
       </div>
+        </>
+      )}
     </div>
     {!isCloud && <PublishPanel place={place} onPlaceChange={onPlaceChange} />}
     {isCloud && (
@@ -1411,7 +1552,7 @@ export default function PlacePage() {
 
           {!picking && panel === "about" && (
             <>
-              <AboutPanel place={place} isCloud={isCloud} onPlaceChange={setPlace} />
+              <AboutPanel place={place} isCloud={isCloud} cloudUser={cloudUser} onPlaceChange={setPlace} />
               {!isCloud && (
               <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
                 <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">archive data</p>
