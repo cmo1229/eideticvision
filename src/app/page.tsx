@@ -28,12 +28,6 @@ const IDEAS = [
   },
 ]
 
-const STUDIO_PINS = [
-  { x: 0.24, y: 0.42, label: "First Night Here", color: "#c4b5fd", glow: "rgba(167,139,250,0.55)" },
-  { x: 0.55, y: 0.36, label: "Late Night Dinner", color: "#fcd34d", glow: "rgba(251,191,36,0.4)" },
-  { x: 0.76, y: 0.55, label: "The Desk", color: "#67e8f9", glow: "rgba(103,232,249,0.4)" },
-]
-
 export default function Page() {
   const [mounted, setMounted] = useState(false)
   const [studioExists, setStudioExists] = useState(false)
@@ -47,7 +41,10 @@ export default function Page() {
     } catch {}
   }, [])
 
-  const exploreHref = studioExists ? `/place/${SEED_PLACE_ID}` : "/places"
+  // Explore always opens the public archive directory; the featured strip
+  // deep-links to the seeded example when it exists.
+  const exploreHref = "/explore"
+  const featuredHref = studioExists ? `/place/${SEED_PLACE_ID}` : "/explore"
 
   return (
     <main className="min-h-screen bg-[#060607] text-neutral-200">
@@ -120,7 +117,7 @@ export default function Page() {
           >
             <span className="text-neutral-600">featured · </span>
             <Link
-              href={exploreHref}
+              href={featuredHref}
               className="text-violet-300/80 hover:text-violet-200 transition-colors"
             >
               Studio Apartment — Claremont, California · 2025–2026 →

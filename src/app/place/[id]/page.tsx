@@ -18,6 +18,7 @@ import {
   savePlace,
   addMember,
   getSplatUrl,
+  getSplatBlob,
   fileToDataUrl,
   fileToMediaDataUrl,
   formatMemoryDate,
@@ -28,6 +29,16 @@ import {
   type Memory,
   type MemoryPosition,
 } from "@/lib/places"
+import {
+  fetchPublicPlace,
+  getCloudUser,
+  sendMagicLink,
+  signOut,
+  publishPlace,
+  unpublishPlace,
+  isCloudConfigured,
+  type CloudUser,
+} from "@/lib/cloud"
 
 /* ---------------- 3D memory marker (splat mode) ---------------- */
 
@@ -76,7 +87,7 @@ function SurfacePin({
         e.stopPropagation()
         onSelect()
       }}
-      className="absolute z-10 group -translate-x-1/2 -translate-y-1/2"
+      className="absolute z-10 group -translate-x-1/2 -translate-y-1/2 p-2.5 -m-2.5"
       style={{
         left: `${memory.position.x * 100}%`,
         top: `${memory.position.y * 100}%`,
@@ -92,8 +103,10 @@ function SurfacePin({
         }`}
       />
       <span
-        className={`absolute left-1/2 -translate-x-1/2 top-full mt-2 whitespace-nowrap text-[9px] tracking-[0.2em] uppercase px-2 py-1 bg-black/70 backdrop-blur-sm transition-opacity duration-300 ${
-          active ? "text-neutral-100 opacity-100" : "text-neutral-400 opacity-0 group-hover:opacity-100"
+        className={`absolute left-1/2 -translate-x-1/2 top-full mt-1 whitespace-nowrap text-[9px] tracking-[0.2em] uppercase px-2 py-1 bg-black/70 backdrop-blur-sm transition-opacity duration-300 ${
+          active
+            ? "text-neutral-100 opacity-100"
+            : "text-neutral-400 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
         }`}
       >
         {memory.title}
@@ -379,7 +392,7 @@ function MemoryDetail({
 }: {
   memory: Memory
   member?: PlaceMember
-  onDelete: () => void
+  onDelete?: () => void
   onClose: () => void
 }) {
   return (
@@ -418,12 +431,14 @@ function MemoryDetail({
           <p className="mt-4 text-xs text-neutral-400 leading-relaxed font-light">{memory.story}</p>
         )}
 
-        <button
-          onClick={onDelete}
-          className="mt-5 text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-red-400/70 transition-colors"
-        >
-          remove this memory
-        </button>
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="mt-5 text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-red-400/70 transition-colors"
+          >
+            remove this memory
+          </button>
+        )}
       </div>
     </div>
   )
@@ -434,9 +449,11 @@ function MemoryDetail({
 function ContributorsPanel({
   place,
   onUpdate,
+  readOnly = false,
 }: {
   place: Place
   onUpdate: (p: Place) => void
+  readOnly?: boolean
 }) {
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<"contributor" | "viewer">("contributor")
@@ -479,6 +496,7 @@ function ContributorsPanel({
         </div>
       </div>
 
+      {!readOnly && (
       <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
         <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">invite contributor</p>
         <div className="mt-4 space-y-3">
@@ -517,14 +535,187 @@ function ContributorsPanel({
           )}
         </div>
       </div>
+      )}
+    </div>
+  )
+}
+
+/* ---------------- Publish panel (owner, local place) ---------------- */
+
+function PublishPanel({
+  place,
+  onPlaceChange,
+}: {
+  place: Place
+  onPlaceChange: (p: Place) => void
+}) {
+  const [user, setUser] = useState<CloudUser | null>(null)
+  const [checked, setChecked] = useState(false)
+  const [email, setEmail] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const cloudReady = isCloudConfigured()
+
+  useEffect(() => {
+    getCloudUser()
+      .then((u) => setUser(u))
+      .catch(() => {})
+      .finally(() => setChecked(true))
+  }, [])
+
+  const handleSendLink = async () => {
+    setError(null)
+    setMessage(null)
+    if (!email.includes("@")) {
+      setError("enter a valid email")
+      return
+    }
+    setBusy(true)
+    try {
+      await sendMagicLink(email)
+      setMessage(`sign-in link sent to ${email} — open it on this device to continue`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "could not send the link")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handlePublish = async () => {
+    setError(null)
+    setMessage(null)
+    setBusy(true)
+    try {
+      const splatBlob = await getSplatBlob(place.id)
+      const result = await publishPlace(place, loadMemories(place.id), splatBlob)
+      const updated = { ...place, cloudId: result.cloudId }
+      savePlace(updated)
+      onPlaceChange(updated)
+      setMessage("published — the place is now in the public archive")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "publish failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleUnpublish = async () => {
+    if (!place.cloudId) return
+    setError(null)
+    setMessage(null)
+    setBusy(true)
+    try {
+      await unpublishPlace(place.cloudId)
+      const updated = { ...place, cloudId: undefined }
+      savePlace(updated)
+      onPlaceChange(updated)
+      setMessage("unpublished — the place is private again")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "unpublish failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!cloudReady) {
+    return (
+      <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">public archive</p>
+        <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
+          The archive backend is not connected yet, so publishing is pending. Your place stays
+          private on this device.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
+      <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">public archive</p>
+
+      {!checked ? null : !user ? (
+        <div className="mt-4 space-y-3">
+          <p className="text-xs text-neutral-500 leading-relaxed font-light">
+            Sign in to publish this place — its rooms, memories, and voices — so anyone can walk
+            through it.
+          </p>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="email address"
+            className={inputCls}
+          />
+          <button
+            onClick={handleSendLink}
+            disabled={busy}
+            className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+          >
+            {busy ? "sending…" : "email me a sign-in link"}
+          </button>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-neutral-300">
+              signed in as <span className="text-neutral-500">{user.email}</span>
+            </p>
+            <button
+              onClick={() => signOut().then(() => setUser(null))}
+              className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors"
+            >
+              sign out
+            </button>
+          </div>
+          {place.cloudId ? (
+            <>
+              <p className="text-[10px] tracking-[0.15em] uppercase text-[#c9bda4]/80">
+                ✓ published to the public archive
+              </p>
+              <button
+                onClick={handleUnpublish}
+                disabled={busy}
+                className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-300 hover:border-neutral-500 transition-colors disabled:opacity-40"
+              >
+                {busy ? "working…" : "unpublish (make private)"}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handlePublish}
+              disabled={busy}
+              className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+            >
+              {busy ? "publishing — uploading the archive…" : "publish to the public archive"}
+            </button>
+          )}
+          <p className="text-[10px] text-neutral-600 leading-relaxed">
+            Publishing uploads the capture, memories, and contributors. Private places are never
+            listed; you can unpublish at any time.
+          </p>
+        </div>
+      )}
+
+      {message && <p className="mt-3 text-[10px] text-[#c9bda4]/90 leading-relaxed">{message}</p>}
+      {error && <p className="mt-3 text-[10px] text-red-400/80 leading-relaxed">{error}</p>}
     </div>
   )
 }
 
 /* ---------------- About panel ---------------- */
 
-function AboutPanel({ place }: { place: Place }) {
+function AboutPanel({
+  place,
+  isCloud,
+  onPlaceChange,
+}: {
+  place: Place
+  isCloud: boolean
+  onPlaceChange: (p: Place) => void
+}) {
   return (
+    <>
     <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5 space-y-4">
       <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">about this place</p>
       {place.description && (
@@ -543,7 +734,9 @@ function AboutPanel({ place }: { place: Place }) {
         </div>
         <div className="flex justify-between gap-4">
           <span className="text-neutral-600">privacy</span>
-          <span className="text-neutral-400 text-right">private</span>
+          <span className="text-neutral-400 text-right">
+            {isCloud ? "public archive" : place.cloudId ? "published" : "private"}
+          </span>
         </div>
         <div className="flex justify-between gap-4">
           <span className="text-neutral-600">spatial capture</span>
@@ -555,6 +748,14 @@ function AboutPanel({ place }: { place: Place }) {
         </div>
       </div>
     </div>
+    {!isCloud && <PublishPanel place={place} onPlaceChange={onPlaceChange} />}
+    {isCloud && (
+      <p className="text-[10px] text-neutral-600 leading-relaxed px-1">
+        This place belongs to its owner. Visits are read-only — the archive above is exactly as
+        they published it.
+      </p>
+    )}
+    </>
   )
 }
 
@@ -571,6 +772,7 @@ export default function PlacePage() {
   const [memories, setMemories] = useState<Memory[]>([])
   const [splatUrl, setSplatUrl] = useState<string | null>(null)
   const [splatLoaded, setSplatLoaded] = useState(false)
+  const [isCloud, setIsCloud] = useState(false)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [picking, setPicking] = useState<MemoryPosition | null>(null)
@@ -579,13 +781,30 @@ export default function PlacePage() {
   const importRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const p = getPlace(placeId)
-    if (!p) {
-      router.push("/places")
+    // Published place from the public archive — read-only visit
+    if (placeId.startsWith("cloud-")) {
+      const cloudId = placeId.slice("cloud-".length)
+      // Intentional mount-time state (client-only data path)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsCloud(true)
+      fetchPublicPlace(cloudId).then((cp) => {
+        if (!cp) {
+          router.push("/explore")
+          return
+        }
+        setPlace(cp.place)
+        setMemories(cp.memories)
+        setSplatUrl(cp.splatUrl)
+        setSplatLoaded(true)
+      })
       return
     }
-    // Intentional mount-time load from localStorage (client-only data)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
+    const p = getPlace(placeId)
+    if (!p) {
+      router.push("/explore")
+      return
+    }
     setPlace(p)
     setMemories(loadMemories(placeId))
     getSplatUrl(placeId).then((url) => {
@@ -624,7 +843,7 @@ export default function PlacePage() {
   }, [awaitingPick])
 
   const handleSaveMemory = (m: Memory) => {
-    if (!place) return
+    if (!place || isCloud) return
     const saved = { ...m, placeId }
     saveMemory(saved)
     setMemories(loadMemories(placeId))
@@ -690,28 +909,30 @@ export default function PlacePage() {
   )
 
   return (
-    <main className="min-h-screen bg-[#060607] text-neutral-200">
+    <main className="h-[100dvh] bg-[#060607] text-neutral-200 flex flex-col overflow-hidden">
       <Nav />
 
-      {/* Header: identity left, navigation right */}
-      <header className="fixed top-14 inset-x-0 z-40 bg-[#060607]/85 backdrop-blur-sm border-b border-neutral-900">
-        <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between gap-6">
+      <div className="pt-14 flex flex-col flex-1 min-h-0">
+      {/* Header: identity left, navigation right — stacks on mobile */}
+      <header className="shrink-0 bg-[#060607]/95 backdrop-blur-sm border-b border-neutral-900">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-2 sm:py-0 sm:h-16 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm font-light text-neutral-100 tracking-wide truncate">{place.name}</h1>
             <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500 mt-0.5 truncate">
               {place.location} · {place.startYear}–{place.endOpen ? "Present" : place.endYear}
             </p>
           </div>
-          <nav className="flex items-center gap-4 sm:gap-6 shrink-0">
+          <nav className="flex items-center gap-3 sm:gap-6 shrink-0 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {navItem("memories", `Memories ${memories.length > 0 ? `(${memories.length})` : ""}`)}
             {navItem("contributors", "Contributors")}
             {navItem("about", "About")}
+            {!isCloud && (
             <button
               onClick={() => {
                 setAwaitingPick((v) => !v)
                 setSelectedId(null)
               }}
-              className={`text-[10px] tracking-[0.25em] uppercase px-4 py-2 border transition-all ${
+              className={`text-[10px] tracking-[0.25em] uppercase px-4 py-2 border transition-all shrink-0 ${
                 awaitingPick
                   ? "border-[#f5efe2]/60 text-[#f5efe2] bg-[#c9bda4]/[0.15]"
                   : "border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12]"
@@ -719,11 +940,12 @@ export default function PlacePage() {
             >
               {awaitingPick ? "choose a spot…" : "+ Add Memory"}
             </button>
+            )}
           </nav>
         </div>
       </header>
 
-      <div className="pt-30 flex flex-col h-screen">
+      <div className="flex-1 min-h-0 flex flex-col">
         {/* Viewer — the place is visually dominant */}
         <div className="flex-1 min-h-0 px-4 sm:px-6 pt-4">
           <div className="relative w-full h-full border border-neutral-900">
@@ -732,8 +954,8 @@ export default function PlacePage() {
               splatName={place.splatName}
               splatFormat={place.splatFormat}
               loading={!splatLoaded}
-              onSurfacePick={handleSurfacePick}
-              onWorldPick={handleWorldPick}
+              onSurfacePick={isCloud ? undefined : handleSurfacePick}
+              onWorldPick={isCloud ? undefined : handleWorldPick}
               renderSceneExtras={
                 <>
                   {splatUrl &&
@@ -788,10 +1010,11 @@ export default function PlacePage() {
           />
         </div>
       </div>
+      </div>
 
-      {/* Side panel — memories / contributors / about / composer */}
+      {/* Side panel — bottom sheet on mobile, right panel on desktop */}
       {(panel || picking || awaitingPick) && (
-        <aside className="fixed right-0 top-30 bottom-0 z-40 w-full sm:w-[380px] bg-[#060607]/95 backdrop-blur-md border-l border-neutral-900 overflow-y-auto p-5 space-y-4">
+        <aside className="fixed z-40 inset-x-0 bottom-0 max-h-[62dvh] rounded-t-lg border-t border-neutral-800 sm:rounded-none sm:border-t-0 sm:border-l sm:border-neutral-900 sm:inset-x-auto sm:right-0 sm:top-30 sm:bottom-0 sm:max-h-none sm:w-[380px] bg-[#060607]/95 backdrop-blur-md overflow-y-auto p-5 space-y-4">
           {picking && (
             <div className="space-y-3">
               <Composer
@@ -826,7 +1049,7 @@ export default function PlacePage() {
                 <MemoryDetail
                   memory={selected}
                   member={place.members.find((m) => m.name === selected.contributorId)}
-                  onDelete={() => {
+                  onDelete={isCloud ? undefined : () => {
                     setMemories(deleteMemory(selected.id, placeId))
                     setSelectedId(null)
                   }}
@@ -877,6 +1100,7 @@ export default function PlacePage() {
           {!picking && panel === "contributors" && (
             <ContributorsPanel
               place={place}
+              readOnly={isCloud}
               onUpdate={(p) => {
                 setPlace(p)
                 setMemories(loadMemories(placeId))
@@ -886,7 +1110,8 @@ export default function PlacePage() {
 
           {!picking && panel === "about" && (
             <>
-              <AboutPanel place={place} />
+              <AboutPanel place={place} isCloud={isCloud} onPlaceChange={setPlace} />
+              {!isCloud && (
               <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
                 <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">archive data</p>
                 <div className="mt-4 grid grid-cols-2 gap-3">
@@ -915,11 +1140,12 @@ export default function PlacePage() {
                   later, to shared storage.
                 </p>
               </div>
+              )}
               <button
-                onClick={() => router.push("/places")}
+                onClick={() => router.push(isCloud ? "/explore" : "/places")}
                 className="w-full text-left text-[10px] tracking-[0.3em] uppercase text-neutral-600 hover:text-neutral-400 transition-colors px-1"
               >
-                ← back to my places
+                ← {isCloud ? "back to explore" : "back to my places"}
               </button>
             </>
           )}

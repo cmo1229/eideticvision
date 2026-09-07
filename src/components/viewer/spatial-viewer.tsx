@@ -282,6 +282,8 @@ export default function SpatialViewer({
   const [splatError, setSplatError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // iOS Safari doesn't support element fullscreen — CSS immersive mode instead
+  const [immersive, setImmersive] = useState(false)
 
   // Reset per-URL load state (intentional sync reset on capture change)
   useEffect(() => {
@@ -295,10 +297,11 @@ export default function SpatialViewer({
   useEffect(() => {
     const onChange = () => setIsFullscreen(!!document.fullscreenElement)
     document.addEventListener("fullscreenchange", onChange)
-    // Guaranteed ESC exit even when the browser doesn't handle it itself
+    // Guaranteed ESC exit for native fullscreen and immersive mode
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {})
+      if (e.key === "Escape") {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+        setImmersive(false)
       }
     }
     document.addEventListener("keydown", onKey)
@@ -314,8 +317,11 @@ export default function SpatialViewer({
     if (!el) return
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {})
+      setImmersive(false)
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => setImmersive(true))
     } else {
-      el.requestFullscreen().catch(() => {})
+      setImmersive(true)
     }
   }
 
@@ -332,7 +338,11 @@ export default function SpatialViewer({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full bg-[#060607] overflow-hidden select-none ${className}`}
+      className={`relative bg-[#060607] overflow-hidden select-none ${
+        immersive
+          ? "fixed inset-0 z-[70] h-full"
+          : `w-full h-full ${className}`
+      }`}
       onClick={handleSurfaceClick}
     >
       {hasCapture ? (
@@ -380,9 +390,9 @@ export default function SpatialViewer({
         />
       )}
 
-      {/* Movement hint — only when a real capture is being navigated */}
+      {/* Movement hint — only when a real capture is being navigated, keyboard devices only */}
       {hasCapture && splatReady && (
-        <div className="absolute bottom-3 left-4 z-20 text-[9px] tracking-[0.25em] uppercase text-neutral-600 pointer-events-none">
+        <div className="absolute bottom-3 left-4 z-20 text-[9px] tracking-[0.25em] uppercase text-neutral-600 pointer-events-none hidden [@media(hover:hover)_and_(pointer:fine)]:block">
           wasd / arrows move · q e rise sink · drag to look
         </div>
       )}
@@ -391,13 +401,13 @@ export default function SpatialViewer({
       <button
         onClick={toggleFullscreen}
         className={`absolute top-3 right-3 z-30 px-3 py-1.5 text-[9px] tracking-[0.25em] uppercase backdrop-blur-sm border transition-all ${
-          isFullscreen
+          isFullscreen || immersive
             ? "border-[#c9bda4]/50 text-[#f5efe2] bg-black/60"
             : "border-neutral-700/60 text-neutral-400 hover:text-neutral-100 hover:border-neutral-500 bg-black/40"
         }`}
-        title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
+        title={isFullscreen || immersive ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
       >
-        {isFullscreen ? "× exit fullscreen · esc" : "⛶ fullscreen"}
+        {isFullscreen || immersive ? "× exit fullscreen" : "⛶ fullscreen"}
       </button>
 
       {/* HTML overlay layer — memory markers, HUD. Rendering engine stays below. */}

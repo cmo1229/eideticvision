@@ -29,6 +29,7 @@ export interface Place {
   splatName?: string
   splatFormat?: string
   splatRenderingReady?: boolean // false = file stored, viewer integration pending
+  cloudId?: string // set once the place has been published to the public archive
   members: PlaceMember[]
   createdAt: number
 }
