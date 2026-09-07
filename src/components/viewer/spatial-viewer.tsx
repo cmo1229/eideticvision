@@ -20,12 +20,99 @@
 /* ------------------------------------------------------------------ */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Canvas, useThree } from "@react-three/fiber"
+import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark"
 
 export type SplatFormat = "ply" | "splat" | "spz" | "sog"
+
+/* ---------------- Keyboard movement (WASD / arrows) ---------------- */
+
+const MOVE_KEYS = new Set([
+  "w",
+  "a",
+  "s",
+  "d",
+  "arrowup",
+  "arrowdown",
+  "arrowleft",
+  "arrowright",
+  "q",
+  "e",
+])
+
+/** Moves the camera and orbit target together — WASD/arrows walk, Q/E rise
+ *  and sink. Mouse still handles look and zoom via OrbitControls. Speed
+ *  scales with distance to the target so it works at any capture scale. */
+function KeyboardMovement() {
+  const { camera, controls } = useThree()
+  const keys = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const isEditable = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null
+      return (
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+    }
+    const down = (e: KeyboardEvent) => {
+      if (isEditable(e.target)) return
+      const k = e.key.toLowerCase()
+      if (MOVE_KEYS.has(k)) {
+        keys.current.add(k)
+        e.preventDefault()
+      }
+    }
+    const up = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase())
+    const clear = () => keys.current.clear()
+    window.addEventListener("keydown", down)
+    window.addEventListener("keyup", up)
+    window.addEventListener("blur", clear)
+    return () => {
+      window.removeEventListener("keydown", down)
+      window.removeEventListener("keyup", up)
+      window.removeEventListener("blur", clear)
+    }
+  }, [])
+
+  useFrame((_, delta) => {
+    if (keys.current.size === 0) return
+    const c = controls as { target: THREE.Vector3; update: () => void } | null
+    if (!c) return
+    const k = keys.current
+    const dist = camera.position.distanceTo(c.target)
+    const speed = Math.max(0.4, dist * 0.9) * Math.min(delta, 0.1)
+
+    // Horizontal forward/strafe basis from the camera's look direction
+    const forward = new THREE.Vector3()
+    camera.getWorldDirection(forward)
+    forward.y = 0
+    if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1)
+    forward.normalize()
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0))
+
+    const move = new THREE.Vector3()
+    if (k.has("w") || k.has("arrowup")) move.add(forward)
+    if (k.has("s") || k.has("arrowdown")) move.sub(forward)
+    if (k.has("d") || k.has("arrowright")) move.add(right)
+    if (k.has("a") || k.has("arrowleft")) move.sub(right)
+    if (k.has("e")) move.y += 1
+    if (k.has("q")) move.y -= 1
+    if (move.lengthSq() === 0) return
+    move.normalize().multiplyScalar(speed)
+
+    camera.position.add(move)
+    c.target.add(move)
+    c.update()
+  })
+
+  return null
+}
 
 /* ---------------- Spark splat mesh with auto framing ---------------- */
 
@@ -250,6 +337,7 @@ export default function SpatialViewer({
     >
       {hasCapture ? (
         <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#060607" }}>
+          <KeyboardMovement />
           <SparkSplat
             url={splatUrl!}
             fileName={splatName}
@@ -290,6 +378,13 @@ export default function SpatialViewer({
               : "The splat file could not be displayed. Try re-exporting it from the capture app."
           }
         />
+      )}
+
+      {/* Movement hint — only when a real capture is being navigated */}
+      {hasCapture && splatReady && (
+        <div className="absolute bottom-3 left-4 z-20 text-[9px] tracking-[0.25em] uppercase text-neutral-600 pointer-events-none">
+          wasd / arrows move · q e rise sink · drag to look
+        </div>
       )}
 
       {/* Viewer chrome — fullscreen toggle (ESC exits) */}
