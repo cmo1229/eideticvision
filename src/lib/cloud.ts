@@ -112,6 +112,48 @@ function mapMemoryToRow(memory: Memory, placeId: string) {
   }
 }
 
+/** Upload progress reporter: phase label + 0..1 percent (null = indeterminate). */
+export type SyncProgress = (phase: string, percent: number | null) => void
+
+/** Supabase free plan caps uploads at 50 MB per file. */
+const MAX_UPLOAD_BYTES = 49_500_000
+
+/** XHR upload with real progress events (supabase-js upload has none). */
+function uploadWithProgress(
+  supabaseUrl: string,
+  jwt: string,
+  anonKey: string,
+  bucket: string,
+  path: string,
+  blob: Blob,
+  contentType: string,
+  onProgress: (percent: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `${supabaseUrl}/storage/v1/object/${bucket}/${path}`)
+    xhr.setRequestHeader("apikey", anonKey)
+    xhr.setRequestHeader("Authorization", `Bearer ${jwt}`)
+    xhr.setRequestHeader("x-upsert", "true")
+    xhr.setRequestHeader("Content-Type", contentType)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total)
+    }
+    xhr.onload = () => {
+      if (xhr.status < 300) resolve()
+      else {
+        let detail = ""
+        try {
+          detail = (JSON.parse(xhr.responseText as string) as { message?: string }).message ?? ""
+        } catch {}
+        reject(new Error(detail || `upload failed (${xhr.status})`))
+      }
+    }
+    xhr.onerror = () => reject(new Error("upload failed — network error"))
+    xhr.send(blob)
+  })
+}
+
 /** Sync a local place to the cloud (create or update).
  *  makePublic=false → shared privately with invited members only.
  *  makePublic=true  → listed in the public archive.
@@ -121,27 +163,43 @@ export async function syncPlaceToCloud(
   place: Place,
   memories: Memory[],
   splatBlob: Blob | null,
-  makePublic: boolean
+  makePublic: boolean,
+  onProgress?: SyncProgress
 ): Promise<PublishResult> {
   const supabase = getSupabase()
   const { data } = await supabase.auth.getUser()
   const user = data.user
   if (!user) throw new Error("sign in first")
   if (place.id.startsWith("cloud-")) throw new Error("cloud places cannot be synced again")
+  const { data: session } = await supabase.auth.getSession()
+  const jwt = session.session?.access_token ?? ""
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
 
   const existingId = place.cloudId
   const row = mapPlaceToRow(place, user.id)
   row.is_public = makePublic
 
+  // Honest size check before starting — free plan caps uploads at 50 MB
+  const bigFile = [splatBlob, place.coverImageUrl?.startsWith("data:")
+    ? await (await fetch(place.coverImageUrl)).blob() : null]
+    .find((b): b is Blob => !!b && b.size > MAX_UPLOAD_BYTES)
+  if (bigFile) {
+    const mb = (bigFile.size / 1024 / 1024).toFixed(1)
+    throw new Error(
+      `a file is ${mb} MB — Supabase's free plan caps uploads at 50 MB. Export the capture as .spz (much smaller) or upgrade the Supabase plan.`
+    )
+  }
+
   // Upload cover
   if (place.coverImageUrl?.startsWith("data:")) {
+    onProgress?.("uploading the cover image", 0)
     const path = `${user.id}/${place.id}-cover.jpg`
     const blob = await (await fetch(place.coverImageUrl)).blob()
-    const { error } = await supabase.storage.from("covers").upload(path, blob, {
-      contentType: "image/jpeg",
-      upsert: true,
-    })
-    if (error) throw new Error(`cover upload failed: ${error.message}`)
+    await uploadWithProgress(
+      supabaseUrl, jwt, anonKey, "covers", path, blob, "image/jpeg",
+      (p) => onProgress?.("uploading the cover image", p)
+    )
     row.cover_url = supabase.storage.from("covers").getPublicUrl(path).data.publicUrl
   }
 
@@ -150,13 +208,18 @@ export async function syncPlaceToCloud(
   if (splatBlob) {
     const ext = place.splatName?.split(".").pop() ?? "ply"
     const path = `${user.id}/${place.id}.${ext}`
-    const { error } = await supabase.storage.from("splats").upload(path, splatBlob, {
-      upsert: true,
-    })
-    if (error) throw new Error(`capture upload failed: ${error.message}`)
+    const label = `uploading the capture (${(splatBlob.size / 1024 / 1024).toFixed(1)} MB)`
+    onProgress?.(label, 0)
+    await uploadWithProgress(
+      supabaseUrl, jwt, anonKey, "splats", path, splatBlob,
+      ext === "spz" ? "application/octet-stream" : "application/octet-stream",
+      (p) => onProgress?.(label, p)
+    )
     splatUrl = supabase.storage.from("splats").getPublicUrl(path).data.publicUrl
     row.splat_url = splatUrl
   }
+
+  onProgress?.(existingId ? "saving your changes" : "building the archive", null)
 
   let cloudId: string
   if (existingId) {

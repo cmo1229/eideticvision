@@ -701,6 +701,7 @@ function PublishPanel({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ phase: string; percent: number | null } | null>(null)
   const cloudReady = isCloudConfigured()
 
   useEffect(() => {
@@ -732,9 +733,12 @@ function PublishPanel({
     setError(null)
     setMessage(null)
     setBusy(true)
+    setProgress(null)
     try {
       const splatBlob = await getSplatBlob(place.id)
-      const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, true)
+      const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, true, (phase, percent) =>
+        setProgress({ phase, percent })
+      )
       const updated = { ...place, cloudId: result.cloudId }
       savePlace(updated)
       onPlaceChange(updated)
@@ -743,6 +747,7 @@ function PublishPanel({
       setError(e instanceof Error ? e.message : "publish failed")
     } finally {
       setBusy(false)
+      setProgress(null)
     }
   }
 
@@ -825,14 +830,37 @@ function PublishPanel({
               </button>
             </>
           ) : (
-            <button
-              onClick={handlePublish}
-              disabled={busy}
-              className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
-            >
-              {busy ? "publishing — uploading the archive…" : "publish to the public archive"}
-            </button>
+            <>
+              <button
+                onClick={handlePublish}
+                disabled={busy}
+                className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+              >
+                {busy ? "working…" : "publish to the public archive"}
+              </button>
+              {progress && (
+                <div className="pt-1">
+                  <div className="h-1 w-full bg-neutral-900 overflow-hidden">
+                    <div
+                      className="h-full bg-[#c9bda4] transition-[width] duration-200 ease-out"
+                      style={{
+                        width:
+                          progress.percent === null
+                            ? "100%"
+                            : `${Math.round(progress.percent * 100)}%`,
+                        opacity: progress.percent === null ? 0.4 : 1,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[10px] tracking-[0.15em] uppercase text-neutral-500 tabular-nums">
+                    {progress.phase}
+                    {progress.percent !== null ? ` · ${Math.round(progress.percent * 100)}%` : "…"}
+                  </p>
+                </div>
+              )}
+            </>
           )}
+
           <p className="text-[10px] text-neutral-600 leading-relaxed">
             Publishing uploads the capture, memories, and contributors. Private places are never
             listed; you can unpublish at any time.
