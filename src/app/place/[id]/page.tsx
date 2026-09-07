@@ -661,23 +661,23 @@ function ContributorsPanel({
         </div>
       )}
 
-      {/* Not yet shared — enable real collaboration */}
+      {/* Not yet shared — set up invites */}
       {!cloudId && !isCloud && (
         <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
           <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">
-            real invites
+            invite by email
           </p>
           <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
             {cloudUser
-              ? "Share this place privately with people by email — they'll sign in and add their own memories to it."
-              : "Sign in, then share this place with people by email — they'll sign in and add their own memories."}
+              ? "Invite someone by email — they'll get a link, sign in, and add their own memories to this place. Only they can see it until you publish."
+              : "Sign in first (from the About panel), then you can invite people by email — they'll get a link, sign in, and add their own memories."}
           </p>
           <button
             onClick={onEnableSharing}
             disabled={sharing}
-            className="mt-4 w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-200 hover:border-neutral-500 transition-colors disabled:opacity-40"
+            className="mt-4 w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
           >
-            {sharing ? "preparing…" : "enable real invites"}
+            {sharing ? "preparing…" : "invite collaborators"}
           </button>
         </div>
       )}
