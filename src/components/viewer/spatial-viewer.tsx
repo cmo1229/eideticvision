@@ -402,6 +402,8 @@ export default function SpatialViewer({
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {})
       setImmersive(false)
+    } else if (immersive) {
+      setImmersive(false)
     } else if (el.requestFullscreen) {
       el.requestFullscreen().catch(() => setImmersive(true))
     } else {
