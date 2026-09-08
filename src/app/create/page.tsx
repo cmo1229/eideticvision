@@ -198,7 +198,7 @@ export default function CreatePage() {
             <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
               Capturing with Scaniverse? Share → Export →{" "}
               <span className="text-[#c9bda4]/90">SPZ</span> — the same scan at 5–10× smaller, and
-              well under the 50 MB upload limit. Large .ply files won't fit.
+              well under the 50 MB upload limit. Large .ply files won&apos;t fit.
             </p>
             {splatFile && splatFile.name.toLowerCase().endsWith(".sog") && (
               <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">

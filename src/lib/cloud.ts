@@ -452,6 +452,23 @@ export async function addCloudMemory(cloudId: string, memory: Memory): Promise<v
   if (error) throw new Error(`could not save memory: ${error.message}`)
 }
 
+/** Edit a cloud memory's text/date (owner or its contributor). */
+export async function updateCloudMemory(cloudId: string, memory: Memory): Promise<void> {
+  const supabase = getSupabase()
+  const rawId = memory.id.replace(/^cloud[:\-]/, "")
+  const { error } = await supabase
+    .from("memories")
+    .update({
+      title: memory.title,
+      story: memory.story,
+      date: memory.date,
+      year: memory.year,
+    })
+    .eq("id", rawId)
+    .eq("place_id", cloudId)
+  if (error) throw new Error(`could not update memory: ${error.message}`)
+}
+
 /** Delete a cloud memory (owner only). memoryId may carry the "cloud:" prefix. */
 export async function deleteCloudMemory(cloudId: string, memoryId: string): Promise<void> {
   const supabase = getSupabase()

@@ -19,7 +19,7 @@
 /*  - onWorldPick: click position as 3D world coordinates              */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
@@ -116,16 +116,51 @@ function KeyboardMovement() {
 
 /* ---------------- Spark splat mesh with auto framing ---------------- */
 
+/** Guess whether the capture is upside down: in a room scan the floor is
+ *  the denser horizontal surface, so if the dense extreme band sits at the
+ *  top of the Y extent, the file needs a 180° X flip. */
+function detectUpsideDown(splat: SplatMesh): boolean {
+  const MAX = 40000
+  const ys: number[] = []
+  let seen = 0
+  splat.forEachSplat((_i, center) => {
+    if (ys.length < MAX) ys.push(center.y)
+    else {
+      const j = Math.floor(Math.random() * (seen + 1))
+      if (j < MAX) ys[j] = center.y
+    }
+    seen++
+  })
+  if (ys.length < 100) return false
+  let yMin = Infinity
+  let yMax = -Infinity
+  for (const y of ys) {
+    if (y < yMin) yMin = y
+    if (y > yMax) yMax = y
+  }
+  const band = (yMax - yMin) * 0.08
+  let bottom = 0
+  let top = 0
+  for (const y of ys) {
+    if (y < yMin + band) bottom++
+    else if (y > yMax - band) top++
+  }
+  return bottom < top * 0.75
+}
+
 function SparkSplat({
   url,
   fileName,
+  flip,
   onReady,
   onError,
   onPick,
 }: {
   url: string
   fileName?: string
-  onReady: () => void
+  /** true = flipped 180°, false = upright, undefined = auto-detect */
+  flip?: boolean
+  onReady: (detectedUpsideDown: boolean) => void
   onError: (message: string) => void
   onPick?: (pos: { x: number; y: number; z: number }) => void
 }) {
@@ -137,9 +172,11 @@ function SparkSplat({
   // Fetch bytes up front so we can pass the original file name — Spark uses
   // the extension to detect headerless formats (.splat) that blob URLs lack.
   const [bytes, setBytes] = useState<ArrayBuffer | null>(null)
+  const [loaded, setLoaded] = useState(false)
   useEffect(() => {
     let cancelled = false
     setBytes(null)
+    setLoaded(false)
     fetch(url)
       .then((r) => r.arrayBuffer())
       .then((b) => {
@@ -159,26 +196,22 @@ function SparkSplat({
     [bytes, fileName]
   )
 
-  useEffect(() => {
-    let cancelled = false
-    if (!splat) return
+  // Orient (flip or not), recenter, fit the camera
+  const applyOrientation = useCallback(
+    (mesh: SplatMesh, useFlip: boolean, fitCamera: boolean) => {
+      if (useFlip) mesh.quaternion.set(1, 0, 0, 0)
+      else mesh.quaternion.identity()
+      mesh.updateMatrixWorld(true)
+      // Center the capture at the origin
+      const box = new THREE.Box3().setFromObject(mesh)
+      const center = box.getCenter(new THREE.Vector3())
+      const size = box.getSize(new THREE.Vector3())
+      mesh.position.x -= center.x
+      mesh.position.y -= center.y
+      mesh.position.z -= center.z
+      mesh.updateMatrixWorld(true)
 
-    splat.initialized
-      .then(() => {
-        if (cancelled) return
-        // Splat files are authored Y-down — canonical 180° X flip
-        splat.quaternion.set(1, 0, 0, 0)
-        splat.updateMatrixWorld(true)
-        // Center the capture at the origin
-        const box = new THREE.Box3().setFromObject(splat)
-        const center = box.getCenter(new THREE.Vector3())
-        const size = box.getSize(new THREE.Vector3())
-        splat.position.x -= center.x
-        splat.position.y -= center.y
-        splat.position.z -= center.z
-        splat.updateMatrixWorld(true)
-
-        // Fit the camera to the capture's physical extent
+      if (fitCamera) {
         const radius = Math.max(size.x, size.y, size.z) / 2 || 2
         const fov = ((camera as THREE.PerspectiveCamera).fov ?? 60) * (Math.PI / 180)
         const dist = Math.min(30, Math.max(1.5, (radius / Math.tan(fov / 2)) * 0.85))
@@ -188,7 +221,24 @@ function SparkSplat({
           ;(controlsRef.current as unknown as { target: THREE.Vector3 }).target.set(0, 0, 0)
           ;(controlsRef.current as unknown as { update: () => void }).update()
         }
-        onReady()
+      }
+    },
+    [camera]
+  )
+
+  // Initial load: auto-detect orientation unless the user has an explicit pref
+  useEffect(() => {
+    let cancelled = false
+    if (!splat) return
+
+    splat.initialized
+      .then(() => {
+        if (cancelled) return
+        const auto = detectUpsideDown(splat)
+        const useFlip = flip === undefined ? auto : flip
+        applyOrientation(splat, useFlip, true)
+        setLoaded(true)
+        onReady(auto)
       })
       .catch((e: unknown) => {
         if (!cancelled) onError(e instanceof Error ? e.message : String(e))
@@ -200,6 +250,13 @@ function SparkSplat({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splat])
+
+  // Manual flip toggle after load
+  useEffect(() => {
+    if (!splat || !loaded || flip === undefined) return
+    applyOrientation(splat, flip, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flip, loaded])
 
   if (!splat) return null
   return (
@@ -284,6 +341,33 @@ export default function SpatialViewer({
   const [isFullscreen, setIsFullscreen] = useState(false)
   // iOS Safari doesn't support element fullscreen — CSS immersive mode instead
   const [immersive, setImmersive] = useState(false)
+  // Orientation: undefined = auto-detect; explicit value = user's persisted choice
+  const [flipState, setFlipState] = useState<boolean | undefined>(undefined)
+
+  // Restore the user's flip preference for this capture
+  const detectedRef = useRef(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFlipState(undefined)
+    detectedRef.current = false
+    if (splatName) {
+      try {
+        const saved = localStorage.getItem(`eidetic.flip.${splatName}`)
+        if (saved === "1") setFlipState(true)
+        if (saved === "0") setFlipState(false)
+      } catch {}
+    }
+  }, [splatUrl, splatName])
+
+  const toggleFlip = () => {
+    setFlipState((prev) => {
+      const next = !(prev ?? detectedRef.current)
+      try {
+        if (splatName) localStorage.setItem(`eidetic.flip.${splatName}`, next ? "1" : "0")
+      } catch {}
+      return next
+    })
+  }
 
   // Reset per-URL load state (intentional sync reset on capture change)
   useEffect(() => {
@@ -351,7 +435,9 @@ export default function SpatialViewer({
           <SparkSplat
             url={splatUrl!}
             fileName={splatName}
-            onReady={() => {
+            flip={flipState}
+            onReady={(detected) => {
+              detectedRef.current = detected
               setSplatReady(true)
             }}
             onError={(message) => setSplatError(message)}
@@ -395,6 +481,20 @@ export default function SpatialViewer({
         <div className="absolute bottom-3 left-4 z-20 text-[9px] tracking-[0.25em] uppercase text-neutral-600 pointer-events-none hidden [@media(hover:hover)_and_(pointer:fine)]:block">
           wasd / arrows move · q e rise sink · drag to look
         </div>
+      )}
+
+      {/* Viewer chrome — flip orientation (persisted per capture) */}
+      {hasCapture && splatReady && !splatError && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            toggleFlip()
+          }}
+          className="absolute top-3 right-[135px] z-30 px-3 py-1.5 text-[9px] tracking-[0.25em] uppercase backdrop-blur-sm border border-neutral-700/60 text-neutral-400 hover:text-neutral-100 hover:border-neutral-500 bg-black/40 transition-all"
+          title="Flip the capture upside down if it loaded inverted"
+        >
+          ⇅ flip
+        </button>
       )}
 
       {/* Viewer chrome — fullscreen toggle (ESC exits) */}

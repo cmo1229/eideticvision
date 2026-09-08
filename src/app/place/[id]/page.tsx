@@ -41,6 +41,7 @@ import {
   inviteMember,
   revokeInvite,
   addCloudMemory,
+  updateCloudMemory,
   deleteCloudMemory,
   deleteCloudPlace,
   isCloudConfigured,
@@ -194,9 +195,9 @@ function Timeline({
         />
       </div>
       <div className="flex items-center justify-between mt-1">
-        <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 tabular-nums">{min}</span>
-        <span className="text-[11px] tracking-[0.3em] uppercase text-[#e8e2d4] tabular-nums">{value}</span>
-        <span className="text-[10px] tracking-[0.3em] uppercase text-neutral-600 tabular-nums">{max}</span>
+        <span className="text-xs tracking-[0.3em] uppercase text-neutral-400 tabular-nums">{min}</span>
+        <span className="text-sm tracking-[0.3em] uppercase text-[#f5efe2] tabular-nums">{value}</span>
+        <span className="text-xs tracking-[0.3em] uppercase text-neutral-400 tabular-nums">{max}</span>
       </div>
     </div>
   )
@@ -435,27 +436,104 @@ function MemoryDetail({
   memory,
   member,
   onDelete,
+  onEdit,
   onClose,
 }: {
   memory: Memory
   member?: PlaceMember
   onDelete?: () => void
+  onEdit?: (updated: Memory) => void
   onClose: () => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(memory.title)
+  const [story, setStory] = useState(memory.story)
+  const [date, setDate] = useState(memory.date.includes("-") ? memory.date : `${memory.year}-06`)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSave = async () => {
+    if (!title.trim() || !onEdit) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onEdit({
+        ...memory,
+        title: title.trim(),
+        story: story.trim(),
+        date,
+        year: Number(date.slice(0, 4)) || memory.year,
+      })
+      setEditing(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "could not save changes")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="border border-[#c9bda4]/30 bg-[#0a0a0b]/95 p-5">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] tracking-[0.3em] uppercase text-[#c9bda4]/80">edit memory</p>
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 hover:text-neutral-300 transition-colors"
+          >
+            cancel
+          </button>
+        </div>
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className={labelCls}>title</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>story</label>
+            <textarea
+              value={story}
+              onChange={(e) => setStory(e.target.value)}
+              rows={4}
+              className={`${inputCls} resize-none`}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>date</label>
+            <input
+              type="month"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={`${inputCls} [color-scheme:dark]`}
+            />
+          </div>
+          {error && <p className="text-[10px] text-red-400/80">{error}</p>}
+          <button
+            onClick={handleSave}
+            disabled={busy || !title.trim()}
+            className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+          >
+            {busy ? "saving…" : "save changes"}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="border border-neutral-800/70 bg-[#0a0a0b]/95">
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-sm text-neutral-100 font-light">{memory.title}</h3>
-            <p className="mt-1.5 text-[9px] tracking-[0.25em] uppercase text-neutral-500">
+            <h3 className="text-base text-neutral-50 font-light">{memory.title}</h3>
+            <p className="mt-1.5 text-[10px] tracking-[0.25em] uppercase text-neutral-400">
               {formatMemoryDate(memory.date)} · {memory.contributorId}
               {member?.role === "owner" ? " · owner" : ""}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-neutral-300 transition-colors shrink-0"
+            className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 hover:text-neutral-300 transition-colors shrink-0"
           >
             close
           </button>
@@ -475,10 +553,20 @@ function MemoryDetail({
         {memory.audioUrl && <audio src={memory.audioUrl} controls className="mt-4 w-full" />}
 
         {memory.story && (
-          <p className="mt-4 text-xs text-neutral-400 leading-relaxed font-light">{memory.story}</p>
+          <p className="mt-4 text-sm text-neutral-300 leading-relaxed font-light">{memory.story}</p>
         )}
 
-        {onDelete && <DeleteMemoryButton onDelete={onDelete} />}
+        <div className="mt-5 flex items-center gap-5">
+          {onEdit && (
+            <button
+              onClick={() => setEditing(true)}
+              className="text-[10px] tracking-[0.2em] uppercase text-neutral-500 hover:text-[#e8e2d4] transition-colors"
+            >
+              edit memory
+            </button>
+          )}
+          {onDelete && <DeleteMemoryButton onDelete={onDelete} />}
+        </div>
       </div>
     </div>
   )
@@ -509,6 +597,10 @@ function ContributorsPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [manualLink, setManualLink] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [signInEmail, setSignInEmail] = useState("")
+  const [signInBusy, setSignInBusy] = useState(false)
+  const [signInMsg, setSignInMsg] = useState<string | null>(null)
+  const [signInError, setSignInError] = useState<string | null>(null)
   const cloudId = place.cloudId
 
   const handleInvite = async () => {
@@ -665,21 +757,70 @@ function ContributorsPanel({
       {/* Not yet shared — set up invites */}
       {!cloudId && !isCloud && (
         <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
-          <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">
+          <p className="text-[10px] tracking-[0.3em] uppercase text-neutral-400">
             invite by email
           </p>
-          <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
-            {cloudUser
-              ? "Invite someone by email — they'll get a link, sign in, and add their own memories to this place. Only they can see it until you publish."
-              : "Sign in first (from the About panel), then you can invite people by email — they'll get a link, sign in, and add their own memories."}
-          </p>
-          <button
-            onClick={onEnableSharing}
-            disabled={sharing}
-            className="mt-4 w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
-          >
-            {sharing ? "preparing…" : "invite collaborators"}
-          </button>
+          {!cloudUser ? (
+            <>
+              <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
+                Invite someone by email — they&apos;ll get a link, sign in, and add their own
+                memories. First, sign in so the invite comes from you:
+              </p>
+              <div className="mt-4 space-y-3">
+                <input
+                  type="email"
+                  value={signInEmail}
+                  onChange={(e) => setSignInEmail(e.target.value)}
+                  placeholder="your email address"
+                  className={inputCls}
+                />
+                <button
+                  onClick={async () => {
+                    setSignInError(null)
+                    if (!signInEmail.includes("@")) {
+                      setSignInError("enter a valid email")
+                      return
+                    }
+                    setSignInBusy(true)
+                    try {
+                      await sendMagicLink(signInEmail)
+                      setSignInMsg(
+                        `sign-in link sent to ${signInEmail} — open it on this device, then come back and tap invite collaborators`
+                      )
+                    } catch (e) {
+                      setSignInError(e instanceof Error ? e.message : "could not send the link")
+                    } finally {
+                      setSignInBusy(false)
+                    }
+                  }}
+                  disabled={signInBusy}
+                  className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+                >
+                  {signInBusy ? "sending…" : "email me a sign-in link"}
+                </button>
+                {signInMsg && (
+                  <p className="text-[10px] text-[#c9bda4]/90 leading-relaxed">{signInMsg}</p>
+                )}
+                {signInError && (
+                  <p className="text-[10px] text-red-400/80 leading-relaxed">{signInError}</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
+                They&apos;ll get a link, sign in, and add their own memories to this place. Only
+                they can see it until you publish.
+              </p>
+              <button
+                onClick={onEnableSharing}
+                disabled={sharing}
+                className="mt-4 w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+              >
+                {sharing ? "preparing…" : "invite collaborators"}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1030,25 +1171,23 @@ function AboutPanel({
       {place.description && (
         <p className="text-xs text-neutral-400 leading-relaxed font-light">{place.description}</p>
       )}
-      <div className="pt-2 space-y-2 text-[10px] tracking-[0.15em] uppercase">
+      <div className="pt-3 space-y-2.5 text-xs tracking-[0.15em] uppercase">
         <div className="flex justify-between gap-4">
-          <span className="text-neutral-600">location</span>
-          <span className="text-neutral-400 text-right">{place.location || "—"}</span>
+          <span className="text-neutral-500">location</span>
+          <span className="text-neutral-200 text-right normal-case">{place.location || "—"}</span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-neutral-600">years</span>
-          <span className="text-neutral-400 text-right">
-            {place.startYear}–{place.endOpen ? "Present" : place.endYear}
-          </span>
+          <span className="text-neutral-500">years</span>
+          <span className="text-neutral-200 text-right">{place.startYear}–{place.endOpen ? "Present" : place.endYear}</span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-neutral-600">privacy</span>
+          <span className="text-neutral-500">privacy</span>
           <span className="text-neutral-400 text-right">
             {isCloud ? "public archive" : place.cloudId ? "published" : "private"}
           </span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-neutral-600">spatial capture</span>
+          <span className="text-neutral-500">spatial capture</span>
           <span className="text-neutral-400 text-right">
             {place.hasSplat
               ? `${place.splatName ?? "file"} — rendering ${place.splatRenderingReady === false ? "integration pending" : "ready"}`
@@ -1058,6 +1197,7 @@ function AboutPanel({
       </div>
         </>
       )}
+      {message && <p className="text-[10px] text-[#c9bda4]/90 leading-relaxed">{message}</p>}
     </div>
     {!isCloud && <PublishPanel place={place} onPlaceChange={onPlaceChange} />}
     {isCloud && (
@@ -1341,8 +1481,8 @@ export default function PlacePage() {
     <button
       key={id}
       onClick={() => setPanel(panel === id ? null : id)}
-      className={`text-[10px] tracking-[0.25em] uppercase transition-colors ${
-        panel === id ? "text-[#e8e2d4]" : "text-neutral-500 hover:text-neutral-300"
+      className={`text-xs tracking-[0.25em] uppercase transition-colors ${
+        panel === id ? "text-[#f5efe2]" : "text-neutral-400 hover:text-neutral-100"
       }`}
     >
       {label}
@@ -1358,8 +1498,8 @@ export default function PlacePage() {
       <header className="shrink-0 bg-[#060607]/95 backdrop-blur-sm border-b border-neutral-900">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-2 sm:py-0 sm:h-16 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-sm font-light text-neutral-100 tracking-wide truncate">{place.name}</h1>
-            <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500 mt-0.5 truncate">
+            <h1 className="text-base font-light text-neutral-50 tracking-wide truncate">{place.name}</h1>
+            <p className="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mt-0.5 truncate">
               {place.location} · {place.startYear}–{place.endOpen ? "Present" : place.endYear}
             </p>
           </div>
@@ -1491,6 +1631,20 @@ export default function PlacePage() {
                 <MemoryDetail
                   memory={selected}
                   member={place.members.find((m) => m.name === selected.contributorId)}
+                  onEdit={
+                    activeCloudId && cloudUser && collab?.isOwner
+                      ? async (updated) => {
+                          await updateCloudMemory(activeCloudId, updated)
+                          const cp = await fetchPublicPlace(activeCloudId).catch(() => null)
+                          if (cp) setMemories(cp.memories)
+                        }
+                      : !activeCloudId
+                        ? async (updated) => {
+                            saveMemory({ ...updated, placeId })
+                            setMemories(loadMemories(placeId))
+                          }
+                        : undefined
+                  }
                   onDelete={
                     !activeCloudId || !cloudUser || !collab?.isOwner
                       ? !activeCloudId
