@@ -110,7 +110,7 @@ export default function Page() {
 
           {studioExists && (
             <p
-              className="mt-8 text-[10px] tracking-[0.3em] uppercase"
+              className="mt-8 text-[10px] tracking-[0.3em] uppercase hidden sm:block"
               style={{
                 opacity: mounted ? 1 : 0,
                 transition: "opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.9s",

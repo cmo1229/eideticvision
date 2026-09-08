@@ -144,8 +144,8 @@ function Timeline({
   for (let y = min; y <= max; y++) ticks.push(y)
 
   return (
-    <div className="px-4 sm:px-10 pt-5 pb-3">
-      <div className="relative h-10">
+    <div className="px-3 pt-2.5 pb-1.5 sm:px-10 sm:pt-5 sm:pb-3">
+      <div className="relative h-9 sm:h-10">
         {/* track */}
         <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-neutral-800" />
         {/* progress */}
@@ -354,7 +354,7 @@ function Composer({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={() => mediaRef.current?.click()}
             className="border border-dashed border-neutral-800 hover:border-[#c9bda4]/40 transition-colors py-3 text-[9px] tracking-[0.2em] uppercase text-neutral-500"
@@ -1528,7 +1528,7 @@ export default function PlacePage() {
 
       <div className="flex-1 min-h-0 flex flex-col">
         {/* Viewer — the place is visually dominant */}
-        <div className="flex-1 min-h-0 px-4 sm:px-6 pt-4">
+        <div className="flex-1 min-h-0 px-2 pt-2 sm:px-6 sm:pt-4">
           <div className="relative w-full h-full border border-neutral-900">
             <SpatialViewer
               splatUrl={splatUrl}
@@ -1595,7 +1595,10 @@ export default function PlacePage() {
 
       {/* Side panel — bottom sheet on mobile, right panel on desktop */}
       {(panel || picking || awaitingPick) && (
-        <aside className="fixed z-40 inset-x-0 bottom-0 max-h-[62dvh] rounded-t-lg border-t border-neutral-800 sm:rounded-none sm:border-t-0 sm:border-l sm:border-neutral-900 sm:inset-x-auto sm:right-0 sm:top-30 sm:bottom-0 sm:max-h-none sm:w-[380px] bg-[#060607]/95 backdrop-blur-md overflow-y-auto p-5 space-y-4">
+        <aside className="fixed z-40 inset-x-0 bottom-0 max-h-[68dvh] rounded-t-lg border-t border-neutral-800 sm:rounded-none sm:border-t-0 sm:border-l sm:border-neutral-900 sm:inset-x-auto sm:right-0 sm:top-30 sm:bottom-0 sm:max-h-none sm:w-[380px] bg-[#060607]/95 backdrop-blur-md overflow-y-auto p-4 sm:p-5 space-y-4">
+        <div className="sm:hidden sticky -top-4 -mx-4 mb-1 pt-2 pb-1 flex justify-center bg-[#060607]/95">
+          <span className="w-10 h-1 rounded-full bg-neutral-700" />
+        </div>
           {picking && (
             <div className="space-y-3">
               <Composer
