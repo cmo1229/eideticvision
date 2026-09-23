@@ -71,6 +71,17 @@ export async function completeSignIn(): Promise<boolean> {
   return !!data.session
 }
 
+/** Notify when the session changes, so UI reflects sign-in without a reload.
+ *  The callback is deferred: supabase-js holds a lock while notifying, and
+ *  calling back into the client from inside it can deadlock. */
+export function watchAuth(onChange: () => void): () => void {
+  if (!isCloudConfigured()) return () => {}
+  const { data } = getSupabase().auth.onAuthStateChange(() => {
+    setTimeout(onChange, 0)
+  })
+  return () => data.subscription.unsubscribe()
+}
+
 /* ---------------- Publishing ---------------- */
 
 /** Who can reach a synced place:
@@ -391,10 +402,9 @@ export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
   const supabase = getSupabase()
   const user = (await supabase.auth.getUser()).data.user
 
-  const { data: members } = await supabase
-    .from("place_members")
-    .select("user_id, role, profiles(display_name)")
-    .eq("place_id", cloudId)
+  // Members come from an RPC: place_members has no FK to profiles for PostgREST
+  // to embed, and profiles is readable only by its owner anyway.
+  const { data: members } = await supabase.rpc("get_place_members", { p_place_id: cloudId })
 
   const { data: place } = await supabase
     .from("places")
@@ -425,7 +435,7 @@ export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
     members: (members ?? []).map((m: Record<string, unknown>) => ({
       userId: m.user_id as string,
       role: m.role as "contributor" | "viewer",
-      name: ((m.profiles as Record<string, unknown> | null)?.display_name as string) || "someone",
+      name: (m.display_name as string) || "someone",
       email: "",
     })),
     invites,
