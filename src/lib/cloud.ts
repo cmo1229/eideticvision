@@ -88,6 +88,33 @@ export function watchAuth(onChange: () => void): () => void {
   return () => data.subscription.unsubscribe()
 }
 
+/** A session whose access token is actually usable, or a clear error.
+ *
+ *  Writes must take their user id from the same session that will supply the
+ *  token, and that token has to be live. A stale one makes PostgREST run the
+ *  request as an anonymous user, where `owner_id = auth.uid()` is false and the
+ *  insert is rejected with a misleading "violates row-level security policy"
+ *  — which looks like a database problem but isn't.
+ *
+ *  getUser() is not enough on its own: it can return a cached user when the
+ *  token no longer validates. */
+async function requireSession() {
+  const supabase = getSupabase()
+  const { data } = await supabase.auth.getSession()
+  let session = data.session
+
+  const expiringSoon = !session?.access_token || (session.expires_at ?? 0) * 1000 < Date.now() + 30_000
+  if (expiringSoon) {
+    const { data: refreshed } = await supabase.auth.refreshSession()
+    session = refreshed.session ?? session
+  }
+
+  if (!session?.user || !session.access_token) {
+    throw new Error("your sign-in has expired — sign in again, then retry")
+  }
+  return session
+}
+
 /* ---------------- Publishing ---------------- */
 
 /** Who can reach a synced place:
@@ -192,12 +219,12 @@ export async function syncPlaceToCloud(
   onProgress?: SyncProgress
 ): Promise<PublishResult> {
   const supabase = getSupabase()
-  const { data } = await supabase.auth.getUser()
-  const user = data.user
-  if (!user) throw new Error("sign in first")
+  // Same session for both the row's owner and the request's token, so they
+  // can't disagree — that mismatch is what makes RLS reject an owner's insert.
+  const session = await requireSession()
+  const user = session.user
   if (place.id.startsWith("cloud-")) throw new Error("cloud places cannot be synced again")
-  const { data: session } = await supabase.auth.getSession()
-  const jwt = session.session?.access_token ?? ""
+  const jwt = session.access_token
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
 
