@@ -470,8 +470,16 @@ export default function SpatialViewer({
       }`}
       onClick={handleSurfaceClick}
     >
+      {/* Splats are fill-rate bound and soft-edged, so MSAA buys nothing and
+          Spark's own guidance is to turn it off. The dpr cap stops retina
+          screens from quadrupling the pixels we shade every frame. */}
       {hasCapture ? (
-        <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#060607" }}>
+        <Canvas
+          camera={{ position: [0, 1.6, 6], fov: 60 }}
+          dpr={[1, 1.5]}
+          gl={{ antialias: false, powerPreference: "high-performance" }}
+          style={{ background: "#060607" }}
+        >
           <KeyboardMovement />
           <SparkSplat
             url={splatUrl!}
