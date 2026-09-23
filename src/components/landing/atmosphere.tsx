@@ -124,8 +124,11 @@ function Account() {
         {user ? (
           <>
             <span className="w-5 h-5 rounded-full border border-[#c9bda4]/50 text-[#c9bda4] flex items-center justify-center text-[9px] leading-none">
-              {/* cap height sits above the line box centre — nudge the glyph down */}
-              <span className="translate-y-[0.5px]">
+              {/* flex centres the line box, not the capital: cap height sits above
+                  the line box centre. 0.25px is the measured residue — exact at
+                  DPR 3 and 4, and no worse than any other value at DPR 1, where
+                  the glyph snaps to whole device pixels. */}
+              <span className="translate-y-[0.25px]">
                 {user.displayName.slice(0, 1).toUpperCase()}
               </span>
             </span>

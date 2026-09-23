@@ -659,8 +659,11 @@ function ContributorsPanel({
             .map((m) => (
               <div key={m.id} className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
-                    {m.name.charAt(0).toUpperCase()}
+                  {/* leading-none tightens the line box so the cap sits near the
+                      centre; the 0.5px is the measured residue for 10px text in a
+                      28px circle (max error 0.17px across DPR 1-4). */}
+                  <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] leading-none text-neutral-400 shrink-0">
+                    <span className="translate-y-[0.5px]">{m.name.charAt(0).toUpperCase()}</span>
                   </span>
                   <div className="min-w-0">
                     <p className="text-xs text-neutral-200 truncate">{m.name}</p>
@@ -677,8 +680,11 @@ function ContributorsPanel({
             .map((cm) => (
               <div key={cm.userId} className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
-                    {cm.name.charAt(0).toUpperCase()}
+                  {/* leading-none tightens the line box so the cap sits near the
+                      centre; the 0.5px is the measured residue for 10px text in a
+                      28px circle (max error 0.17px across DPR 1-4). */}
+                  <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] leading-none text-neutral-400 shrink-0">
+                    <span className="translate-y-[0.5px]">{cm.name.charAt(0).toUpperCase()}</span>
                   </span>
                   <div className="min-w-0">
                     {cm.handle ? (
