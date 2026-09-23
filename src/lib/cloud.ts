@@ -100,43 +100,19 @@ export function watchAuth(onChange: () => void): () => void {
  *  token no longer validates. */
 async function requireSession() {
   const supabase = getSupabase()
+  const { data } = await supabase.auth.getSession()
+  let session = data.session
 
-  // Ask the auth server who this token belongs to. A token can sit in storage
-  // and still be refused, and a refused token makes the write go out anonymous.
-  const { data: who, error: whoError } = await supabase.auth.getUser()
-  if (!whoError && who.user) {
-    const { data } = await supabase.auth.getSession()
-    if (data.session?.access_token) return data.session
+  const expiringSoon = !session?.access_token || (session.expires_at ?? 0) * 1000 < Date.now() + 30_000
+  if (expiringSoon) {
+    const { data: refreshed } = await supabase.auth.refreshSession()
+    session = refreshed.session ?? session
   }
 
-  const { data: refreshed, error } = await supabase.auth.refreshSession()
-  if (error || !refreshed.session?.access_token) {
+  if (!session?.user || !session.access_token) {
     throw new Error("your sign-in has expired — sign out and sign in again, then retry")
   }
-  return refreshed.session
-}
-
-/** What the browser is actually sending, for when a write is refused.
- *  Temporary: remove once the sharing write is confirmed working. */
-function tokenFacts(): string {
-  try {
-    const raw = Object.keys(localStorage).find((k) => k.includes("-auth-token"))
-    if (!raw) return "no session in storage"
-    const session = JSON.parse(localStorage.getItem(raw) ?? "null")
-    const token = session?.access_token
-    if (!token) return "session in storage has no access_token"
-    const p = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")))
-    return [
-      `iss=${p.iss ?? "MISSING"}`,
-      `sub=${p.sub ? String(p.sub).slice(0, 8) + "…" : "MISSING"}`,
-      `role=${p.role ?? "MISSING"}`,
-      `expires in ${Math.round((p.exp * 1000 - Date.now()) / 1000)}s`,
-      `owner sent=${session?.user?.id ? String(session.user.id).slice(0, 8) + "…" : "none"}`,
-      `project=${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/^https:\/\//, "")}`,
-    ].join(", ")
-  } catch (e) {
-    return `could not read the session (${e instanceof Error ? e.message : "unknown"})`
-  }
+  return session
 }
 
 /* ---------------- Publishing ---------------- */
@@ -302,16 +278,20 @@ export async function syncPlaceToCloud(
     if (error) throw new Error(`sync failed: ${error.message}`)
     cloudId = existingId
   } else {
-    const { data: inserted, error } = await supabase
-      .from("places")
-      .insert(row)
-      .select("id")
-      .single()
-    if (error) {
-      const detail = error.code === "42501" ? ` — the browser sent: ${tokenFacts()}` : ""
-      throw new Error(`sync failed: ${error.message}${detail}`)
-    }
-    cloudId = inserted.id as string
+    // Insert without asking for the row back, and choose the id here.
+    //
+    // `.select("id")` makes PostgREST send "Prefer: return=representation",
+    // which makes Postgres re-check the places SELECT policy against the new
+    // row. That policy calls can_read_place(), which reads places itself, and
+    // the check is rejected — so an owner cannot read back the row they just
+    // wrote, and creating a place fails with "violates row-level security
+    // policy" even though the insert itself is permitted. Picking the id
+    // locally means we never need the response.
+    const newId = crypto.randomUUID()
+    row.id = newId
+    const { error } = await supabase.from("places").insert(row)
+    if (error) throw new Error(`sync failed: ${error.message}`)
+    cloudId = newId
 
     // First sync: copy the memories over
     const memoryRows = memories
