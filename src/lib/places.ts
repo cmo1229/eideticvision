@@ -390,39 +390,6 @@ export function fileToDataUrl(file: File, maxW = 900): Promise<string> {
   })
 }
 
-/** Downscale a data-URL image (e.g. a still of the 3D capture) into a JPEG cover.
- *  Resolves null when the frame is effectively empty — a capture that hasn't drawn
- *  yet would otherwise be saved as a solid-black cover. */
-export function dataUrlToCover(dataUrl: string, maxW = 640): Promise<string | null> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      const scale = Math.min(1, maxW / img.width)
-      const c = document.createElement("canvas")
-      c.width = Math.max(1, Math.round(img.width * scale))
-      c.height = Math.max(1, Math.round(img.height * scale))
-      const ctx = c.getContext("2d")
-      if (!ctx) {
-        resolve(null)
-        return
-      }
-      ctx.drawImage(img, 0, 0, c.width, c.height)
-      const { data } = ctx.getImageData(0, 0, c.width, c.height)
-      let lit = 0
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] + data[i + 1] + data[i + 2] > 90) lit++
-      }
-      if (lit / (c.width * c.height) < 0.005) {
-        resolve(null)
-        return
-      }
-      resolve(c.toDataURL("image/jpeg", 0.75))
-    }
-    img.onerror = () => resolve(null)
-    img.src = dataUrl
-  })
-}
-
 /** Read a media file as a data URL, rejecting anything too large for
  *  local prototype storage (localStorage holds everything). */
 export async function fileToMediaDataUrl(file: File, maxBytes = 1_800_000): Promise<string> {

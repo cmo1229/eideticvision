@@ -166,7 +166,7 @@ function SparkSplat({
   onPick?: (pos: { x: number; y: number; z: number }) => void
   onCapture?: (capture: () => string | null) => void
 }) {
-  const { gl: renderer, camera, controls } = useThree()
+  const { gl: renderer, scene, camera, controls } = useThree()
   const controlsRef = useRef(controls)
   controlsRef.current = controls
   const spark = useMemo(() => new SparkRenderer({ renderer }), [renderer])
@@ -247,8 +247,27 @@ function SparkSplat({
             requestAnimationFrame(() => {
               if (cancelled) return
               onCapture(() => {
+                // Re-render and read the buffer back in the same task: that works
+                // without preserveDrawingBuffer, which costs frame rate. Encoding a
+                // downsized JPEG (not the full-size PNG) keeps the read cheap.
                 try {
-                  return renderer.domElement.toDataURL("image/png")
+                  renderer.render(scene, camera)
+                  const src = renderer.domElement
+                  const scale = Math.min(1, 640 / src.width)
+                  const c = document.createElement("canvas")
+                  c.width = Math.max(1, Math.round(src.width * scale))
+                  c.height = Math.max(1, Math.round(src.height * scale))
+                  const ctx = c.getContext("2d")
+                  if (!ctx) return null
+                  ctx.drawImage(src, 0, 0, c.width, c.height)
+                  const { data } = ctx.getImageData(0, 0, c.width, c.height)
+                  let lit = 0
+                  for (let i = 0; i < data.length; i += 4) {
+                    if (data[i] + data[i + 1] + data[i + 2] > 90) lit++
+                  }
+                  // Spark draws progressively — an early frame is empty, not a cover.
+                  if (lit / (c.width * c.height) < 0.005) return null
+                  return c.toDataURL("image/jpeg", 0.75)
                 } catch {
                   return null
                 }
@@ -452,11 +471,7 @@ export default function SpatialViewer({
       onClick={handleSurfaceClick}
     >
       {hasCapture ? (
-        <Canvas
-          camera={{ position: [0, 1.6, 6], fov: 60 }}
-          gl={{ preserveDrawingBuffer: true }}
-          style={{ background: "#060607" }}
-        >
+        <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#060607" }}>
           <KeyboardMovement />
           <SparkSplat
             url={splatUrl!}

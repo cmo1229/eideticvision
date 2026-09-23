@@ -21,7 +21,6 @@ import {
   getSplatBlob,
   fileToDataUrl,
   fileToMediaDataUrl,
-  dataUrlToCover,
   formatMemoryDate,
   exportPlace,
   importPlace,
@@ -1603,8 +1602,8 @@ export default function PlacePage() {
   }, [awaitingPick])
 
   // No cover chosen? Take a still of the capture once it has drawn, and use that.
-  // Spark draws progressively, so early frames come back empty — retry until one
-  // has content (dataUrlToCover rejects blank frames) rather than saving a black cover.
+  // Spark draws progressively, so early frames come back empty — the viewer returns
+  // null for a blank frame, and we retry rather than save a black cover.
   const handleCaptureReady = useCallback((capture: () => string | null) => {
     if (autoCoverDone.current) return
     autoCoverDone.current = true
@@ -1638,15 +1637,12 @@ export default function PlacePage() {
       for (let attempt = 0; attempt < 8; attempt++) {
         const p = placeRef.current
         if (!p || p.id.startsWith("cloud-") || p.coverImageUrl || !p.hasSplat) return
-        const shot = capture()
-        if (shot) {
-          const cover = await dataUrlToCover(shot)
-          if (cover) {
-            await persist(p, cover)
-            return
-          }
+        const cover = capture()
+        if (cover) {
+          await persist(p, cover)
+          return
         }
-        await new Promise((r) => setTimeout(r, 700))
+        await new Promise((r) => setTimeout(r, 600))
       }
     })()
   }, [])
