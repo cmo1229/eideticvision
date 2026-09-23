@@ -22,9 +22,10 @@ export const metadata: Metadata = {
       "Preserve a meaningful place in 3D. Add the stories that happened there. Invite the people who remember it. Explore its history through time.",
     images: [
       {
-        url: "/opengraph-image.png",
+        url: "/og-image.jpg",
         width: 1200,
         height: 630,
+        type: "image/jpeg",
         alt: "EideticVision — collaborative spatial archives",
       },
     ],
@@ -34,7 +35,7 @@ export const metadata: Metadata = {
     title: "EideticVision — Keep the places you can't keep forever",
     description:
       "Preserve a meaningful place in 3D. Add the stories that happened there. Invite the people who remember it.",
-    images: ["/opengraph-image.png"],
+    images: ["/og-image.jpg"],
   },
   icons: {
     icon: "/favicon.svg",
