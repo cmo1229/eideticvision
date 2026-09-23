@@ -79,7 +79,8 @@ export default function ProfilePage() {
             <h1 className="mt-4 text-3xl md:text-4xl font-light text-neutral-50 tracking-wide">
               {profile.displayName}
             </h1>
-            <p className="mt-3 text-[11px] tracking-[0.3em] uppercase text-[#c9bda4]">
+            {/* handles are slugs — the uppercase used for labels mangles them */}
+            <p className="mt-3 text-[11px] tracking-[0.3em] text-[#c9bda4]">
               @{profile.handle}
             </p>
 
