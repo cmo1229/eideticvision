@@ -97,7 +97,10 @@ function Account() {
         {user ? (
           <>
             <span className="w-5 h-5 rounded-full border border-[#c9bda4]/50 text-[#c9bda4] flex items-center justify-center text-[9px] leading-none">
-              {user.displayName.slice(0, 1).toUpperCase()}
+              {/* cap height sits above the line box centre — nudge the glyph down */}
+              <span className="translate-y-[0.5px]">
+                {user.displayName.slice(0, 1).toUpperCase()}
+              </span>
             </span>
             <span className="hidden sm:inline max-w-[12ch] truncate normal-case tracking-normal text-[11px] text-neutral-400">
               {user.displayName}
@@ -186,10 +189,10 @@ export function Nav({ active }: { active?: "explore" | "places" | "create" }) {
         >
           Eidetic Vision
         </Link>
-        <div className="flex items-center gap-3 sm:gap-6">
+        <div className="flex items-center gap-2.5 sm:gap-6">
           <Link
             href="/explore"
-            className={`text-[10px] tracking-[0.2em] sm:tracking-[0.3em] uppercase transition-colors ${
+            className={`whitespace-nowrap text-[10px] tracking-[0.2em] sm:tracking-[0.3em] uppercase transition-colors ${
               active === "explore" ? "text-[#e8e2d4]" : "text-neutral-500 hover:text-neutral-300"
             }`}
           >
@@ -197,15 +200,16 @@ export function Nav({ active }: { active?: "explore" | "places" | "create" }) {
           </Link>
           <Link
             href="/places"
-            className={`text-[10px] tracking-[0.2em] sm:tracking-[0.3em] uppercase transition-colors ${
+            className={`whitespace-nowrap text-[10px] tracking-[0.2em] sm:tracking-[0.3em] uppercase transition-colors ${
               active === "places" ? "text-[#e8e2d4]" : "text-neutral-500 hover:text-neutral-300"
             }`}
           >
-            My Places
+            <span className="sm:hidden">Places</span>
+            <span className="hidden sm:inline">My Places</span>
           </Link>
           <Link
             href="/create"
-            className={`text-[10px] tracking-[0.2em] sm:tracking-[0.3em] uppercase px-2.5 sm:px-4 py-1.5 border transition-colors shrink-0 ${
+            className={`whitespace-nowrap text-[10px] tracking-[0.2em] sm:tracking-[0.3em] uppercase px-2.5 sm:px-4 py-1.5 border transition-colors shrink-0 ${
               active === "create"
                 ? "border-[#c9bda4]/50 text-[#e8e2d4]"
                 : "border-neutral-800 text-neutral-300 hover:border-neutral-600"
