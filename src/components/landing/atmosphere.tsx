@@ -131,6 +131,19 @@ function Account() {
             <>
               <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">signed in</p>
               <p className="text-xs text-neutral-300 break-all">{user.email}</p>
+              {user.handle ? (
+                <Link
+                  href={`/@${user.handle}`}
+                  onClick={() => setOpen(false)}
+                  className="block py-2.5 text-center text-[10px] tracking-[0.25em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all"
+                >
+                  your profile
+                </Link>
+              ) : (
+                <p className="text-[10px] text-neutral-600 leading-relaxed">
+                  Profile links turn on once the archive is set up on your account.
+                </p>
+              )}
               <button
                 onClick={() => {
                   setOpen(false)

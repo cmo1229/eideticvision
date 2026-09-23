@@ -6,6 +6,7 @@
 /* ------------------------------------------------------------------ */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import SpatialViewer from "@/components/viewer/spatial-viewer"
 import { Nav } from "@/components/landing/atmosphere"
@@ -679,7 +680,21 @@ function ContributorsPanel({
                   <span className="w-7 h-7 rounded-full border border-neutral-700 flex items-center justify-center text-[10px] text-neutral-400 shrink-0">
                     {cm.name.charAt(0).toUpperCase()}
                   </span>
-                  <p className="text-xs text-neutral-200 truncate">{cm.name}</p>
+                  <div className="min-w-0">
+                    {cm.handle ? (
+                      <Link
+                        href={`/@${cm.handle}`}
+                        className="block text-xs text-neutral-200 hover:text-[#f5efe2] truncate transition-colors"
+                      >
+                        {cm.name}
+                      </Link>
+                    ) : (
+                      <p className="text-xs text-neutral-200 truncate">{cm.name}</p>
+                    )}
+                    {cm.handle && (
+                      <p className="text-[10px] text-neutral-600 truncate">@{cm.handle}</p>
+                    )}
+                  </div>
                 </div>
                 <span className="text-[9px] tracking-[0.2em] uppercase text-neutral-500 shrink-0">
                   {cm.role}

@@ -28,6 +28,8 @@ export interface CloudUser {
   id: string
   email: string
   displayName: string
+  /** Public profile slug. Null until migration-5 has run. */
+  handle: string | null
 }
 
 export async function getCloudUser(): Promise<CloudUser | null> {
@@ -37,13 +39,14 @@ export async function getCloudUser(): Promise<CloudUser | null> {
   if (!data.user) return null
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name")
+    .select("display_name, handle")
     .eq("id", data.user.id)
     .single()
   return {
     id: data.user.id,
     email: data.user.email ?? "",
     displayName: profile?.display_name ?? data.user.email?.split("@")[0] ?? "someone",
+    handle: (profile?.handle as string | null) ?? null,
   }
 }
 
@@ -347,7 +350,13 @@ export interface PlaceInvite {
 }
 
 export interface PlaceCollab {
-  members: Array<{ name: string; email: string; role: "contributor" | "viewer"; userId: string }>
+  members: Array<{
+    name: string
+    email: string
+    role: "contributor" | "viewer"
+    userId: string
+    handle: string | null
+  }>
   invites: PlaceInvite[]
   isOwner: boolean
   isPublic: boolean
@@ -437,6 +446,7 @@ export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
       role: m.role as "contributor" | "viewer",
       name: (m.display_name as string) || "someone",
       email: "",
+      handle: (m.handle as string | null) ?? null,
     })),
     invites,
     isOwner,
@@ -585,6 +595,43 @@ export async function fetchPublicPlaces(): Promise<PublicPlaceCard[]> {
     contributorCount: (r.contributor_count as number) ?? 0,
     createdAt: new Date(r.created_at as string).getTime(),
   }))
+}
+
+export interface PublicProfile {
+  handle: string
+  displayName: string
+  places: PublicPlaceCard[]
+}
+
+/** A person's public profile: their name and the places they've listed.
+ *  Returns null for an unknown handle. There is no people directory — a
+ *  profile is only reachable if someone hands you the link. */
+export async function fetchPublicProfile(handle: string): Promise<PublicProfile | null> {
+  if (!isCloudConfigured()) return null
+  const supabase = getSupabase()
+  const { data, error } = await supabase.rpc("get_public_profile", { p_handle: handle })
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const row = data as Record<string, unknown>
+  const raw = (row.places as Array<Record<string, unknown>>) ?? []
+  return {
+    handle: (row.handle as string) ?? handle,
+    displayName: (row.display_name as string) || ((row.handle as string) ?? handle),
+    places: raw.map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      location: (r.location as string) ?? "",
+      description: (r.description as string) ?? "",
+      startYear: r.start_year as number,
+      endYear: r.end_year as number,
+      endOpen: (r.end_open as boolean) ?? false,
+      coverUrl: (r.cover_url as string) ?? null,
+      hasCapture: (r.has_capture as boolean) ?? false,
+      memoryCount: (r.memory_count as number) ?? 0,
+      contributorCount: (r.contributor_count as number) ?? 0,
+      createdAt: 0,
+    })),
+  }
 }
 
 /** A cloud place, mapped into the local viewer's shape. */

@@ -12,11 +12,19 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Link previews resolve relative image paths against metadataBase; without it
+// Next falls back to localhost and every scraped preview shows a broken image.
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://eideticvision.com";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "EideticVision — Keep the places you can't keep forever",
   description:
     "Turn meaningful places into collaborative spatial archives. Preserve a place in 3D, attach stories, photos and voices to where they happened, and move through its history with a timeline.",
   openGraph: {
+    type: "website",
+    url: siteUrl,
+    siteName: "Eidetic Vision",
     title: "EideticVision — Keep the places you can't keep forever",
     description:
       "Preserve a meaningful place in 3D. Add the stories that happened there. Invite the people who remember it. Explore its history through time.",
