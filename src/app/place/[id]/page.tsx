@@ -1510,6 +1510,7 @@ export default function PlacePage() {
   const [cloudUser, setCloudUser] = useState<CloudUser | null>(null)
   const [collab, setCollab] = useState<PlaceCollab | null>(null)
   const [sharing, setSharing] = useState(false)
+  const [memoryError, setMemoryError] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [picking, setPicking] = useState<MemoryPosition | null>(null)
@@ -1673,9 +1674,18 @@ export default function PlacePage() {
   const handleSaveMemory = async (m: Memory) => {
     if (!place) return
 
-    // Cloud place: write through to the archive (owner or invited contributor)
-    if (activeCloudId && cloudUser) {
-      const saved = { ...m, contributorId: cloudUser.displayName }
+    // Once a place is published the cloud copy is the source of truth for its
+    // memories, so the memory has to go there. Saving it locally instead would
+    // be quietly discarded — the cloud memories replace the local list on load.
+    if (activeCloudId) {
+      // Resolve the author rather than trusting state that may not have loaded.
+      const author = cloudUser ?? (await getCloudUser().catch(() => null))
+      if (!author) {
+        setMemoryError("Sign in to add a memory to a shared place.")
+        return
+      }
+      setMemoryError(null)
+      const saved = { ...m, contributorId: author.displayName }
       try {
         await addCloudMemory(activeCloudId, saved)
         const cp = await fetchPublicPlace(activeCloudId)
@@ -1686,9 +1696,10 @@ export default function PlacePage() {
         setPanel("memories")
         setSelectedId(saved.id)
       } catch (e) {
-        // error surfaced by composer? keep simple: log to console state
-        setPanel("memories")
-        console.error(e)
+        // Leave the composer open with the text intact rather than losing it.
+        setMemoryError(
+          e instanceof Error ? `could not save this memory: ${e.message}` : "could not save this memory"
+        )
       }
       return
     }
@@ -1877,8 +1888,14 @@ export default function PlacePage() {
                 years={years}
                 fixedContributor={activeCloudId && cloudUser ? cloudUser.displayName : undefined}
                 onSave={handleSaveMemory}
-                onCancel={() => setPicking(null)}
+                onCancel={() => {
+                  setPicking(null)
+                  setMemoryError(null)
+                }}
               />
+              {memoryError && (
+                <p className="text-[10px] text-red-400/80 leading-relaxed text-center">{memoryError}</p>
+              )}
               <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 text-center">
                 pinned at {(picking.x * 100).toFixed(0)}%, {(picking.y * 100).toFixed(0)}%
                 {splatUrl ? " of the space" : " of the frame — re-anchor once capture is connected"}
