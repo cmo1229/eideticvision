@@ -616,8 +616,10 @@ function ContributorsPanel({
     if (!cloudId) return
     setBusy(true)
     try {
-      const ownerName = place.members.find((m) => m.role === "owner")?.name ?? "Someone"
-      const result = await inviteMember(cloudId, email.trim(), role, place.name, ownerName)
+      // The sender is whoever is signed in. place.members is rebuilt from memory
+      // contributors on cloud places, so it holds no owner entry to read a name from.
+      const inviterName = cloudUser?.displayName ?? "Someone"
+      const result = await inviteMember(cloudId, email.trim(), role, place.name, inviterName)
       if (result.emailed) {
         setMessage(`invite sent to ${email.trim()} — it's pending until they join`)
       } else {

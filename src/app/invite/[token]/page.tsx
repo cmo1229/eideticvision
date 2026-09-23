@@ -73,7 +73,8 @@ export default function InvitePage() {
     setBusy(true)
     setError(null)
     try {
-      await sendMagicLink(preview.email)
+      // Send them back to this invitation, not the archive, once they're signed in.
+      await sendMagicLink(preview.email, `${window.location.origin}/invite/${token}`)
       setError(null)
       setPreview({ ...preview }) // re-render shows "link sent" state below
     } catch (e) {

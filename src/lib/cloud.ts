@@ -47,11 +47,11 @@ export async function getCloudUser(): Promise<CloudUser | null> {
   }
 }
 
-export async function sendMagicLink(email: string): Promise<void> {
+export async function sendMagicLink(email: string, redirectTo?: string): Promise<void> {
   const supabase = getSupabase()
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: `${window.location.origin}/explore` },
+    options: { emailRedirectTo: redirectTo ?? `${window.location.origin}/explore` },
   })
   if (error) throw new Error(error.message)
 }
@@ -455,7 +455,16 @@ export async function getInvitePreview(token: string): Promise<InvitePreview | n
   const supabase = getSupabase()
   const { data, error } = await supabase.rpc("get_invite_preview", { p_token: token })
   if (error) throw new Error(error.message)
-  return (data as InvitePreview | null) ?? null
+  if (!data) return null
+  // The RPC builds its json with snake_case keys; the invite page reads camelCase.
+  const row = data as Record<string, unknown>
+  return {
+    email: (row.email as string) ?? "",
+    role: row.role as InvitePreview["role"],
+    status: row.status as InvitePreview["status"],
+    placeName: (row.place_name as string) ?? "",
+    inviterName: (row.inviter_name as string) ?? "",
+  }
 }
 
 /** Signed-in user's cloud places — owned or shared with them (RLS-scoped). */
