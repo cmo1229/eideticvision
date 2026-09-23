@@ -99,6 +99,10 @@ $$;
 grant execute on function public.get_public_profile(text) to anon, authenticated;
 
 -- ---------- Members now carry a handle, so names can link to profiles ----------
+-- Adding the handle column changes the OUT row type, which "create or replace"
+-- refuses (42P13). Drop first; the grant is re-issued below.
+drop function if exists public.get_place_members(uuid);
+
 create or replace function public.get_place_members(p_place_id uuid)
 returns table (user_id uuid, role text, display_name text, handle text)
 language sql
