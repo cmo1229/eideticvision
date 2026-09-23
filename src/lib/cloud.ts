@@ -69,6 +69,9 @@ export async function completeSignIn(): Promise<boolean> {
   if (!isCloudConfigured()) return false
   const supabase = getSupabase()
   if (typeof window === "undefined") return false
+  // Only an actual magic-link redirect carries a code. Exchanging without one
+  // is a guaranteed 400 from the auth endpoint on every ordinary page load.
+  if (!new URLSearchParams(window.location.search).get("code")) return false
   const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href)
   if (error) return false
   return !!data.session
@@ -353,7 +356,7 @@ export interface PlaceCollab {
   members: Array<{
     name: string
     email: string
-    role: "contributor" | "viewer"
+    role: "owner" | "contributor" | "viewer"
     userId: string
     handle: string | null
   }>
@@ -443,7 +446,7 @@ export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
   return {
     members: (members ?? []).map((m: Record<string, unknown>) => ({
       userId: m.user_id as string,
-      role: m.role as "contributor" | "viewer",
+      role: m.role as "owner" | "contributor" | "viewer",
       name: (m.display_name as string) || "someone",
       email: "",
       handle: (m.handle as string | null) ?? null,
@@ -597,10 +600,23 @@ export async function fetchPublicPlaces(): Promise<PublicPlaceCard[]> {
   }))
 }
 
+/** Set the signed-in user's display name. */
+export async function updateDisplayName(name: string): Promise<void> {
+  const supabase = getSupabase()
+  const { data } = await supabase.auth.getUser()
+  const user = data.user
+  if (!user) throw new Error("sign in first")
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error("a name can't be empty")
+  if (trimmed.length > 60) throw new Error("that name is too long")
+  const { error } = await supabase.from("profiles").update({ display_name: trimmed }).eq("id", user.id)
+  if (error) throw new Error(error.message)
+}
+
 export interface PublicProfile {
   handle: string
   displayName: string
-  places: PublicPlaceCard[]
+  places: Array<PublicPlaceCard & { owned: boolean }>
 }
 
 /** A person's public profile: their name and the places they've listed.
@@ -630,6 +646,7 @@ export async function fetchPublicProfile(handle: string): Promise<PublicProfile 
       memoryCount: (r.memory_count as number) ?? 0,
       contributorCount: (r.contributor_count as number) ?? 0,
       createdAt: 0,
+      owned: (r.owned as boolean) ?? false,
     })),
   }
 }

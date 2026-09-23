@@ -12,6 +12,7 @@ export function ArchiveCard({
   coverUrl,
   href,
   index,
+  note,
 }: {
   name: string
   location: string
@@ -21,6 +22,8 @@ export function ArchiveCard({
   coverUrl?: string | null
   href: string
   index: number
+  /** Small qualifier beside the years, e.g. "contributed". */
+  note?: string
 }) {
   return (
     <Link
@@ -53,7 +56,10 @@ export function ArchiveCard({
         {location && (
           <p className="mt-1.5 text-[11px] tracking-[0.25em] uppercase text-neutral-400">{location}</p>
         )}
-        <p className="mt-1 text-[11px] tracking-[0.25em] uppercase text-neutral-500">{years}</p>
+        <p className="mt-1 text-[11px] tracking-[0.25em] uppercase text-neutral-500">
+          {years}
+          {note && <span className="text-[#c9bda4]/70"> · {note}</span>}
+        </p>
         <div className="mt-4 flex items-center justify-between">
           <p className="text-[11px] tracking-[0.2em] uppercase text-neutral-400">
             {memories} memories · {contributors} voice{contributors !== 1 ? "s" : ""}

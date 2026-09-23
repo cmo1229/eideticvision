@@ -86,7 +86,7 @@ export default function ProfilePage() {
 
             <div className="mt-14">
               <p className="text-xs tracking-[0.35em] uppercase text-[#c9bda4]">
-                places they&apos;ve listed
+                places they&apos;re part of
               </p>
 
               {profile.places.length === 0 ? (
@@ -95,7 +95,8 @@ export default function ProfilePage() {
                     Nothing listed yet.
                   </p>
                   <p className="mt-3 text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
-                    A place only appears here once its keeper has listed it in the archive.
+                    A place appears here once its keeper has listed it in the archive. Nothing
+                    private ever shows up.
                   </p>
                 </div>
               ) : (
@@ -111,6 +112,7 @@ export default function ProfilePage() {
                       coverUrl={p.coverUrl}
                       href={`/place/cloud-${p.id}`}
                       index={i}
+                      note={p.owned ? undefined : "contributed"}
                     />
                   ))}
                 </div>

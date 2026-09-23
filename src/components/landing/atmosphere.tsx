@@ -7,6 +7,7 @@ import {
   sendMagicLink,
   signOut,
   watchAuth,
+  updateDisplayName,
   isCloudConfigured,
   type CloudUser,
 } from "@/lib/cloud"
@@ -23,6 +24,10 @@ function Account() {
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState(false)
+  const [name, setName] = useState("")
+  const [nameBusy, setNameBusy] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -80,13 +85,35 @@ function Account() {
     }
   }
 
+  const handleSaveName = async () => {
+    if (!user) return
+    setNameBusy(true)
+    setNameError(null)
+    try {
+      await updateDisplayName(name)
+      setUser({ ...user, displayName: name.trim() })
+      setEditingName(false)
+    } catch (e) {
+      setNameError(e instanceof Error ? e.message : "could not save the name")
+    } finally {
+      setNameBusy(false)
+    }
+  }
+
   // Keep the nav the same width while auth resolves to avoid a layout jump.
   if (!ready) return <span className="hidden sm:block w-16" aria-hidden="true" />
 
   return (
     <div ref={boxRef} className="relative shrink-0">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          // closing mid-edit shouldn't leave the name form open next time
+          if (open) {
+            setEditingName(false)
+            setNameError(null)
+          }
+          setOpen(!open)
+        }}
         aria-expanded={open}
         aria-label={user ? `Signed in as ${user.email}` : "Sign in"}
         title={user ? `Signed in as ${user.email}` : "Sign in"}
@@ -131,6 +158,49 @@ function Account() {
             <>
               <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">signed in</p>
               <p className="text-xs text-neutral-300 break-all">{user.email}</p>
+
+              {/* the name shown on your profile and beside your memories */}
+              {editingName ? (
+                <>
+                  <input
+                    type="text"
+                    value={name}
+                    autoFocus
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveName()
+                      if (e.key === "Escape") setEditingName(false)
+                    }}
+                    placeholder="your name"
+                    className="w-full bg-transparent border-b border-neutral-800 px-1 py-2 text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-[#c9bda4]/60 transition-colors"
+                  />
+                  <button
+                    onClick={handleSaveName}
+                    disabled={nameBusy}
+                    className="w-full py-2.5 text-[10px] tracking-[0.25em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+                  >
+                    {nameBusy ? "saving…" : "save name"}
+                  </button>
+                  {nameError && (
+                    <p className="text-[10px] text-red-400/80 leading-relaxed">{nameError}</p>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    setName(user.displayName)
+                    setNameError(null)
+                    setEditingName(true)
+                  }}
+                  className="w-full flex items-center justify-between gap-2 py-2.5 px-1 text-[10px] tracking-[0.25em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 transition-colors"
+                >
+                  <span className="truncate normal-case tracking-normal text-[11px]">
+                    {user.displayName}
+                  </span>
+                  <span className="shrink-0">edit</span>
+                </button>
+              )}
+
               {user.handle ? (
                 <Link
                   href={`/@${user.handle}`}
