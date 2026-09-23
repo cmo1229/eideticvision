@@ -3,6 +3,14 @@
 --  Paste into: Supabase Dashboard → SQL Editor → Run
 --  Adds: place_members, place_invites, accept-invite RPCs,
 --  and extends RLS so invited members can see + contribute.
+--
+--  Safe to run more than once.
+--
+--  NOTE: the read policies route membership checks through a
+--  SECURITY DEFINER function. Writing them inline makes the
+--  places and place_members policies reference each other, which
+--  Postgres rejects as "infinite recursion detected in policy" —
+--  and that takes place pages down entirely.
 -- ============================================================
 
 -- ---------- Members ----------
@@ -16,22 +24,6 @@ create table if not exists public.place_members (
 );
 
 alter table public.place_members enable row level security;
-
-create policy "members read"
-  on public.place_members for select
-  using (
-    user_id = auth.uid()
-    or exists (select 1 from public.places p where p.id = place_id and p.owner_id = auth.uid())
-    or exists (select 1 from public.places p where p.id = place_id and p.is_public)
-  );
-
-create policy "owner manages members"
-  on public.place_members for insert
-  with check (exists (select 1 from public.places p where p.id = place_id and p.owner_id = auth.uid()));
-
-create policy "owner removes members"
-  on public.place_members for delete
-  using (exists (select 1 from public.places p where p.id = place_id and p.owner_id = auth.uid()));
 
 -- ---------- Invites ----------
 create table if not exists public.place_invites (
@@ -50,51 +42,97 @@ create index if not exists invites_place_idx on public.place_invites (place_id);
 
 alter table public.place_invites enable row level security;
 
+-- ---------- Membership checks, outside RLS ----------
+-- SECURITY DEFINER so these lookups bypass RLS rather than re-triggering the
+-- very policies that call them. This is what keeps the rules from recursing.
+create or replace function public.can_read_place(p_place_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.places p
+    where p.id = p_place_id
+      and (
+        p.is_public
+        or p.owner_id = auth.uid()
+        or exists (
+          select 1 from public.place_members pm
+          where pm.place_id = p.id and pm.user_id = auth.uid()
+        )
+      )
+  );
+$$;
+
+grant execute on function public.can_read_place(uuid) to anon, authenticated;
+
+create or replace function public.can_contribute_to_place(p_place_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.places p
+    where p.id = p_place_id
+      and (
+        p.owner_id = auth.uid()
+        or exists (
+          select 1 from public.place_members pm
+          where pm.place_id = p.id and pm.user_id = auth.uid() and pm.role = 'contributor'
+        )
+      )
+  );
+$$;
+
+grant execute on function public.can_contribute_to_place(uuid) to authenticated;
+
+-- ---------- Member policies ----------
+drop policy if exists "members read" on public.place_members;
+create policy "members read"
+  on public.place_members for select
+  using (user_id = auth.uid() or public.can_read_place(place_id));
+
+drop policy if exists "owner manages members" on public.place_members;
+create policy "owner manages members"
+  on public.place_members for insert
+  with check (exists (select 1 from public.places p where p.id = place_id and p.owner_id = auth.uid()));
+
+drop policy if exists "owner removes members" on public.place_members;
+create policy "owner removes members"
+  on public.place_members for delete
+  using (exists (select 1 from public.places p where p.id = place_id and p.owner_id = auth.uid()));
+
+-- ---------- Invite policies ----------
+drop policy if exists "invites managed by owner" on public.place_invites;
 create policy "invites managed by owner"
   on public.place_invites for all
   using (auth.uid() = inviter_id)
   with check (auth.uid() = inviter_id);
 
 -- ---------- Extend place visibility to members ----------
-drop policy "places read public or own" on public.places;
+drop policy if exists "places read public or own" on public.places;
+drop policy if exists "places read public or own or member" on public.places;
 create policy "places read public or own or member"
   on public.places for select
-  using (
-    is_public = true
-    or owner_id = auth.uid()
-    or exists (select 1 from public.place_members pm where pm.place_id = places.id and pm.user_id = auth.uid())
-  );
+  using (public.can_read_place(id));
 
-drop policy "memories read via place" on public.memories;
+drop policy if exists "memories read via place" on public.memories;
 create policy "memories read via place"
   on public.memories for select
-  using (
-    exists (
-      select 1 from public.places p
-      where p.id = memories.place_id
-        and (p.is_public
-             or p.owner_id = auth.uid()
-             or exists (select 1 from public.place_members pm where pm.place_id = p.id and pm.user_id = auth.uid()))
-    )
-  );
+  using (public.can_read_place(memories.place_id));
 
 -- Contributors (not viewers) may add memories to places they belong to
-drop policy "memories insert own place" on public.memories;
+drop policy if exists "memories insert own place" on public.memories;
+drop policy if exists "memories insert owner or contributor" on public.memories;
 create policy "memories insert owner or contributor"
   on public.memories for insert
-  with check (
-    exists (
-      select 1 from public.places p
-      where p.id = memories.place_id
-        and (
-          p.owner_id = auth.uid()
-          or exists (
-            select 1 from public.place_members pm
-            where pm.place_id = p.id and pm.user_id = auth.uid() and pm.role = 'contributor'
-          )
-        )
-    )
-  );
+  with check (public.can_contribute_to_place(place_id));
 
 -- ---------- Invite RPCs ----------
 
@@ -181,3 +219,6 @@ end;
 $$ language plpgsql security definer;
 
 grant execute on function public.accept_invite(uuid) to authenticated;
+
+-- Make PostgREST pick up the new tables immediately
+notify pgrst, 'reload schema';
