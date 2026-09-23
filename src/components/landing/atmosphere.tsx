@@ -123,16 +123,10 @@ function Account() {
       >
         {user ? (
           <>
-            <span className="w-5 h-5 rounded-full border border-[#c9bda4]/50 text-[#c9bda4] flex items-center justify-center text-[9px] leading-none">
-              {/* flex centres the line box, not the capital: cap height sits above
-                  the line box centre. 0.25px is the measured residue — exact at
-                  DPR 3 and 4, and no worse than any other value at DPR 1, where
-                  the glyph snaps to whole device pixels. */}
-              <span className="translate-y-[0.25px]">
-                {user.displayName.slice(0, 1).toUpperCase()}
-              </span>
-            </span>
-            <span className="hidden sm:inline max-w-[12ch] truncate normal-case tracking-normal text-[11px] text-neutral-400">
+            {/* no monogram avatar: the initial never sat right in the circle, and
+                the name alone says who's signed in. Shown at every width — with
+                the circle gone this is the only signed-in signal on a phone. */}
+            <span className="max-w-[10ch] sm:max-w-[12ch] truncate normal-case tracking-normal text-[11px] text-neutral-400">
               {user.displayName}
             </span>
           </>
