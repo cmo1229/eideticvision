@@ -84,7 +84,7 @@ function ArchiveCard({
 
 export default function ExplorePage() {
   const [myPlaces, setMyPlaces] = useState<Place[]>([])
-  const [cloudPlaces, setCloudPlaces] = useState<Array<PublicPlaceCard & { isPublic: boolean; ownerId: string }>>([])
+  const [cloudPlaces, setCloudPlaces] = useState<Array<PublicPlaceCard & { isPublic: boolean; isListed: boolean; ownerId: string }>>([])
   const [publicPlaces, setPublicPlaces] = useState<PublicPlaceCard[] | null>(null)
   const [cloudError, setCloudError] = useState<string | null>(null)
   const cloudReady = isCloudConfigured()

@@ -155,6 +155,7 @@ function SparkSplat({
   onReady,
   onError,
   onPick,
+  onCapture,
 }: {
   url: string
   fileName?: string
@@ -163,6 +164,7 @@ function SparkSplat({
   onReady: (detectedUpsideDown: boolean) => void
   onError: (message: string) => void
   onPick?: (pos: { x: number; y: number; z: number }) => void
+  onCapture?: (capture: () => string | null) => void
 }) {
   const { gl: renderer, camera, controls } = useThree()
   const controlsRef = useRef(controls)
@@ -239,6 +241,21 @@ function SparkSplat({
         applyOrientation(splat, useFlip, true)
         setLoaded(true)
         onReady(auto)
+        // Two frames so Spark has actually drawn before anyone reads the buffer.
+        if (onCapture) {
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              if (cancelled) return
+              onCapture(() => {
+                try {
+                  return renderer.domElement.toDataURL("image/png")
+                } catch {
+                  return null
+                }
+              })
+            })
+          )
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) onError(e instanceof Error ? e.message : String(e))
@@ -319,6 +336,7 @@ export default function SpatialViewer({
   loadingLabel = "opening the place",
   onSurfacePick,
   onWorldPick,
+  onCaptureReady,
   renderSceneExtras,
   children,
   className = "",
@@ -330,6 +348,8 @@ export default function SpatialViewer({
   loadingLabel?: string
   onSurfacePick?: (pos: { x: number; y: number; z: number }) => void
   onWorldPick?: (pos: { x: number; y: number; z: number }) => void
+  /** Called once the capture has drawn, with a function that snapshots it as a PNG data URL. */
+  onCaptureReady?: (capture: () => string | null) => void
   renderSceneExtras?: ReactNode
   children?: ReactNode
   className?: string
@@ -432,7 +452,11 @@ export default function SpatialViewer({
       onClick={handleSurfaceClick}
     >
       {hasCapture ? (
-        <Canvas camera={{ position: [0, 1.6, 6], fov: 60 }} style={{ background: "#060607" }}>
+        <Canvas
+          camera={{ position: [0, 1.6, 6], fov: 60 }}
+          gl={{ preserveDrawingBuffer: true }}
+          style={{ background: "#060607" }}
+        >
           <KeyboardMovement />
           <SparkSplat
             url={splatUrl!}
@@ -444,6 +468,7 @@ export default function SpatialViewer({
             }}
             onError={(message) => setSplatError(message)}
             onPick={onWorldPick}
+            onCapture={onCaptureReady}
           />
           {renderSceneExtras}
           <OrbitControls

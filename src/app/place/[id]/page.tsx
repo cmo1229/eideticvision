@@ -21,6 +21,7 @@ import {
   getSplatBlob,
   fileToDataUrl,
   fileToMediaDataUrl,
+  dataUrlToCover,
   formatMemoryDate,
   exportPlace,
   importPlace,
@@ -37,7 +38,9 @@ import {
   signOut,
   syncPlaceToCloud,
   updateCloudPlace,
+  uploadCloudCover,
   setPlacePublic,
+  setPlaceListed,
   inviteMember,
   revokeInvite,
   addCloudMemory,
@@ -827,14 +830,18 @@ function ContributorsPanel({
   )
 }
 
-/* ---------------- Publish panel (owner, local place) ---------------- */
+/* ---------------- Share panel (owner, local place) ---------------- */
 
-function PublishPanel({
+function SharePanel({
   place,
+  collab,
   onPlaceChange,
+  reloadCollab,
 }: {
   place: Place
+  collab: PlaceCollab | null
   onPlaceChange: (p: Place) => void
+  reloadCollab: () => Promise<void>
 }) {
   const [user, setUser] = useState<CloudUser | null>(null)
   const [checked, setChecked] = useState(false)
@@ -843,6 +850,7 @@ function PublishPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ phase: string; percent: number | null } | null>(null)
+  const [copied, setCopied] = useState(false)
   const cloudReady = isCloudConfigured()
 
   useEffect(() => {
@@ -870,64 +878,106 @@ function PublishPanel({
     }
   }
 
-  const handlePublish = async () => {
+  const [origin, setOrigin] = useState("")
+  useEffect(() => {
+    setOrigin(window.location.origin)
+  }, [])
+
+  // Turning link sharing on for the first time uploads the place to the archive.
+  const handleCreateLink = async () => {
     setError(null)
     setMessage(null)
     setBusy(true)
     setProgress(null)
     try {
       const splatBlob = await getSplatBlob(place.id)
-      const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, true, (phase, percent) =>
+      const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, "link", (phase, percent) =>
         setProgress({ phase, percent })
       )
       const updated = { ...place, cloudId: result.cloudId }
       savePlace(updated)
       onPlaceChange(updated)
-      setMessage("published — the place is now in the public archive")
+      await reloadCollab()
+      setMessage("link created — anyone with it can read this place")
     } catch (e) {
-      setError(e instanceof Error ? e.message : "publish failed")
+      setError(e instanceof Error ? e.message : "could not create the link")
     } finally {
       setBusy(false)
       setProgress(null)
     }
   }
 
-  const handleUnpublish = async () => {
+  const handleToggleLink = async (on: boolean) => {
     if (!place.cloudId) return
     setError(null)
     setMessage(null)
     setBusy(true)
     try {
-      await setPlacePublic(place.cloudId, false)
-      setMessage("unpublished — no longer in the public archive, still shared with collaborators")
+      await setPlacePublic(place.cloudId, on)
+      // A link that stops working can't stay in the archive.
+      if (!on) await setPlaceListed(place.cloudId, false)
+      await reloadCollab()
+      setMessage(on ? "the link works again" : "link sharing is off — this place is private again")
     } catch (e) {
-      setError(e instanceof Error ? e.message : "unpublish failed")
+      setError(e instanceof Error ? e.message : "could not change sharing")
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleToggleListed = async (on: boolean) => {
+    if (!place.cloudId) return
+    setError(null)
+    setMessage(null)
+    setBusy(true)
+    try {
+      await setPlaceListed(place.cloudId, on)
+      await reloadCollab()
+      setMessage(on ? "listed in the public archive" : "removed from the public archive")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "could not change the listing")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const shareUrl = place.cloudId ? `${origin}/place/cloud-${place.cloudId}` : null
+
+  const handleCopy = async () => {
+    if (!shareUrl) return
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError("could not copy — select the link and copy it manually")
     }
   }
 
   if (!cloudReady) {
     return (
       <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
-        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">public archive</p>
+        <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">sharing</p>
         <p className="mt-3 text-xs text-neutral-500 leading-relaxed font-light">
-          The archive backend is not connected yet, so publishing is pending. Your place stays
+          The archive backend is not connected yet, so sharing is pending. Your place stays
           private on this device.
         </p>
       </div>
     )
   }
 
+  const isShared = !!place.cloudId && !!collab?.isPublic
+  const isListed = !!collab?.isListed
+
   return (
     <div className="border border-neutral-800/70 bg-[#0a0a0b]/95 p-5">
-      <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">public archive</p>
+      <p className="text-[9px] tracking-[0.3em] uppercase text-neutral-500">sharing</p>
 
       {!checked ? null : !user ? (
         <div className="mt-4 space-y-3">
           <p className="text-xs text-neutral-500 leading-relaxed font-light">
-            Sign in to publish this place — its rooms, memories, and voices — so anyone can walk
-            through it.
+            Sign in to share this place — its rooms, memories, and voices — with a link or with
+            the public archive.
           </p>
           <input
             type="email"
@@ -957,55 +1007,119 @@ function PublishPanel({
               sign out
             </button>
           </div>
-          {place.cloudId ? (
-            <>
-              <p className="text-[10px] tracking-[0.15em] uppercase text-[#c9bda4]/80">
-                ✓ published to the public archive
-              </p>
-              <button
-                onClick={handleUnpublish}
-                disabled={busy}
-                className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-300 hover:border-neutral-500 transition-colors disabled:opacity-40"
-              >
-                {busy ? "working…" : "unpublish (make private)"}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={handlePublish}
-                disabled={busy}
-                className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
-              >
-                {busy ? "working…" : "publish to the public archive"}
-              </button>
-              {progress && (
-                <div className="pt-1">
-                  <div className="h-1 w-full bg-neutral-900 overflow-hidden">
-                    <div
-                      className="h-full bg-[#c9bda4] transition-[width] duration-200 ease-out"
-                      style={{
-                        width:
-                          progress.percent === null
-                            ? "100%"
-                            : `${Math.round(progress.percent * 100)}%`,
-                        opacity: progress.percent === null ? 0.4 : 1,
-                      }}
-                    />
+          {/* Share by link */}
+          <div className="space-y-3">
+            <p className="text-[9px] tracking-[0.25em] uppercase text-neutral-500">share by link</p>
+            {!place.cloudId ? (
+              <>
+                <p className="text-xs text-neutral-500 leading-relaxed font-light">
+                  Creates a private link. Anyone who has it can read the place — it stays out of
+                  the public archive.
+                </p>
+                <button
+                  onClick={handleCreateLink}
+                  disabled={busy}
+                  className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+                >
+                  {busy ? "working…" : "create a share link"}
+                </button>
+                {progress && (
+                  <div className="pt-1">
+                    <div className="h-1 w-full bg-neutral-900 overflow-hidden">
+                      <div
+                        className="h-full bg-[#c9bda4] transition-[width] duration-200 ease-out"
+                        style={{
+                          width:
+                            progress.percent === null
+                              ? "100%"
+                              : `${Math.round(progress.percent * 100)}%`,
+                          opacity: progress.percent === null ? 0.4 : 1,
+                        }}
+                      />
+                    </div>
+                    <p className="mt-2 text-[10px] tracking-[0.15em] uppercase text-neutral-500 tabular-nums">
+                      {progress.phase}
+                      {progress.percent !== null ? ` · ${Math.round(progress.percent * 100)}%` : "…"}
+                    </p>
                   </div>
-                  <p className="mt-2 text-[10px] tracking-[0.15em] uppercase text-neutral-500 tabular-nums">
-                    {progress.phase}
-                    {progress.percent !== null ? ` · ${Math.round(progress.percent * 100)}%` : "…"}
-                  </p>
+                )}
+              </>
+            ) : isShared ? (
+              <>
+                <div className="border border-neutral-800 bg-black/40 px-3 py-2">
+                  <p className="text-[10px] text-neutral-300 break-all font-mono">{shareUrl}</p>
                 </div>
-              )}
-            </>
-          )}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleCopy}
+                    className="py-3 text-[9px] tracking-[0.25em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all"
+                  >
+                    {copied ? "copied" : "copy link"}
+                  </button>
+                  <button
+                    onClick={() => handleToggleLink(false)}
+                    disabled={busy}
+                    className="py-3 text-[9px] tracking-[0.25em] uppercase border border-neutral-800 text-neutral-400 hover:border-neutral-600 transition-colors disabled:opacity-40"
+                  >
+                    {busy ? "working…" : "stop sharing"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-neutral-600 leading-relaxed">
+                  Anyone with this link can read the place and its memories. It isn&apos;t listed
+                  anywhere.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-neutral-500 leading-relaxed font-light">
+                  Link sharing is off. This place is private to you and the people you invite.
+                </p>
+                <button
+                  onClick={() => handleToggleLink(true)}
+                  disabled={busy}
+                  className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-[#c9bda4]/40 text-[#f5efe2] bg-[#c9bda4]/[0.06] hover:bg-[#c9bda4]/[0.12] transition-all disabled:opacity-40"
+                >
+                  {busy ? "working…" : "turn the link back on"}
+                </button>
+              </>
+            )}
+          </div>
 
-          <p className="text-[10px] text-neutral-600 leading-relaxed">
-            Publishing uploads the capture, memories, and contributors. Private places are never
-            listed; you can unpublish at any time.
-          </p>
+          {/* Public archive */}
+          {isShared && (
+            <div className="space-y-3 border-t border-neutral-900 pt-4">
+              <p className="text-[9px] tracking-[0.25em] uppercase text-neutral-500">
+                public archive
+              </p>
+              {isListed ? (
+                <>
+                  <p className="text-[10px] tracking-[0.15em] uppercase text-[#c9bda4]/80">
+                    ✓ listed in explore
+                  </p>
+                  <button
+                    onClick={() => handleToggleListed(false)}
+                    disabled={busy}
+                    className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-700 text-neutral-300 hover:border-neutral-500 transition-colors disabled:opacity-40"
+                  >
+                    {busy ? "working…" : "remove from the archive"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-neutral-500 leading-relaxed font-light">
+                    List this place in Explore so anyone browsing the archive can find it.
+                  </p>
+                  <button
+                    onClick={() => handleToggleListed(true)}
+                    disabled={busy}
+                    className="w-full py-3 text-[10px] tracking-[0.3em] uppercase border border-neutral-800 text-neutral-300 hover:border-neutral-600 transition-colors disabled:opacity-40"
+                  >
+                    {busy ? "working…" : "list in the public archive"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1038,6 +1152,17 @@ function AboutPanel({
   const [startYear, setStartYear] = useState(place.startYear)
   const [endYear, setEndYear] = useState(place.endYear)
   const [endOpen, setEndOpen] = useState(place.endOpen)
+  const [cover, setCover] = useState<string | undefined>(place.coverImageUrl)
+  const coverRef = useRef<HTMLInputElement>(null)
+
+  const handleCover = async (f: File | undefined) => {
+    if (!f) return
+    try {
+      setCover(await fileToDataUrl(f, 640))
+    } catch {
+      setError("that image could not be read")
+    }
+  }
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -1055,11 +1180,26 @@ function AboutPanel({
       startYear: Math.min(startYear, endYear),
       endYear: Math.max(startYear, endYear),
       endOpen,
+      coverImageUrl: cover,
     }
     savePlace(updated)
     onPlaceChange(updated)
     try {
       if (place.cloudId && cloudUser) {
+        // A freshly chosen cover is still a data URL — upload it and swap in the public one.
+        let coverUrl: string | null | undefined
+        if (cover !== place.coverImageUrl) {
+          if (cover) {
+            const url = await uploadCloudCover(place.id, cover)
+            updated.coverImageUrl = url
+            setCover(url)
+            savePlace(updated)
+            onPlaceChange(updated)
+            coverUrl = url
+          } else {
+            coverUrl = null
+          }
+        }
         await updateCloudPlace(place.cloudId, {
           name: updated.name,
           location: updated.location,
@@ -1067,6 +1207,7 @@ function AboutPanel({
           startYear: updated.startYear,
           endYear: updated.endYear,
           endOpen: updated.endOpen,
+          coverUrl,
         })
       }
       setEditing(false)
@@ -1157,6 +1298,44 @@ function AboutPanel({
               className={`${inputCls} resize-none`}
             />
           </div>
+          <div>
+            <label className={labelCls}>cover photo</label>
+            <button
+              type="button"
+              onClick={() => coverRef.current?.click()}
+              className="mt-2 w-full border border-neutral-800 hover:border-neutral-700 transition-colors p-3 text-left"
+            >
+              {cover ? (
+                <div className="aspect-video w-full overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={cover} alt="cover" className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <span className="text-xs text-neutral-500 font-light">add a photo of the place…</span>
+              )}
+            </button>
+            <div className="mt-2 flex items-center justify-between gap-3 h-3">
+              <span className="text-[9px] tracking-[0.15em] uppercase text-neutral-600">
+                {cover ? "click to replace" : ""}
+              </span>
+              {cover && (
+                <button
+                  type="button"
+                  onClick={() => setCover(undefined)}
+                  className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-red-300 transition-colors"
+                >
+                  remove
+                </button>
+              )}
+            </div>
+            <input
+              ref={coverRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => handleCover(e.target.files?.[0])}
+            />
+          </div>
           {error && <p className="text-[10px] text-red-400/80">{error}</p>}
           <button
             onClick={handleSave}
@@ -1168,6 +1347,16 @@ function AboutPanel({
         </div>
       ) : (
         <>
+      {place.coverImageUrl && (
+        <div className="aspect-video w-full overflow-hidden border border-neutral-800/60">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={place.coverImageUrl}
+            alt={place.name}
+            className="w-full h-full object-cover"
+          />
+        </div>
+      )}
       {place.description && (
         <p className="text-xs text-neutral-400 leading-relaxed font-light">{place.description}</p>
       )}
@@ -1199,7 +1388,6 @@ function AboutPanel({
       )}
       {message && <p className="text-[10px] text-[#c9bda4]/90 leading-relaxed">{message}</p>}
     </div>
-    {!isCloud && <PublishPanel place={place} onPlaceChange={onPlaceChange} />}
     {isCloud && (
       <p className="text-[10px] text-neutral-600 leading-relaxed px-1">
         This place belongs to its owner. Visits are read-only — the archive above is exactly as
@@ -1285,7 +1473,7 @@ function DangerZone({
 
 /* ---------------- Page ---------------- */
 
-type Panel = "memories" | "contributors" | "about"
+type Panel = "memories" | "contributors" | "about" | "share"
 
 export default function PlacePage() {
   const params = useParams()
@@ -1306,6 +1494,18 @@ export default function PlacePage() {
   const [awaitingPick, setAwaitingPick] = useState(false)
   const [timelineYear, setTimelineYear] = useState<number | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
+
+  // Fallback cover: owners often never pick one, so keep the latest place and
+  // cloud user in refs the capture callback can read without going stale.
+  const autoCoverDone = useRef(false)
+  const placeRef = useRef<Place | null>(null)
+  const cloudUserRef = useRef<CloudUser | null>(null)
+  useEffect(() => {
+    placeRef.current = place
+  }, [place])
+  useEffect(() => {
+    cloudUserRef.current = cloudUser
+  }, [cloudUser])
 
   useEffect(() => {
     // Published place from the public archive — read-only visit
@@ -1401,6 +1601,55 @@ export default function PlacePage() {
     setAwaitingPick(false)
     setSelectedId(null)
   }, [awaitingPick])
+
+  // No cover chosen? Take a still of the capture once it has drawn, and use that.
+  // Spark draws progressively, so early frames come back empty — retry until one
+  // has content (dataUrlToCover rejects blank frames) rather than saving a black cover.
+  const handleCaptureReady = useCallback((capture: () => string | null) => {
+    if (autoCoverDone.current) return
+    autoCoverDone.current = true
+
+    const persist = async (p: Place, cover: string) => {
+      const updated: Place = { ...p, coverImageUrl: cover }
+      savePlace(updated)
+      setPlace(updated)
+      const user = cloudUserRef.current
+      if (!p.cloudId || !user) return
+      try {
+        const url = await uploadCloudCover(p.id, cover)
+        const withUrl: Place = { ...updated, coverImageUrl: url }
+        savePlace(withUrl)
+        setPlace(withUrl)
+        await updateCloudPlace(p.cloudId, {
+          name: withUrl.name,
+          location: withUrl.location,
+          description: withUrl.description,
+          startYear: withUrl.startYear,
+          endYear: withUrl.endYear,
+          endOpen: withUrl.endOpen,
+          coverUrl: url,
+        })
+      } catch {
+        // Local cover stands; the owner can still set one from About.
+      }
+    }
+
+    void (async () => {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const p = placeRef.current
+        if (!p || p.id.startsWith("cloud-") || p.coverImageUrl || !p.hasSplat) return
+        const shot = capture()
+        if (shot) {
+          const cover = await dataUrlToCover(shot)
+          if (cover) {
+            await persist(p, cover)
+            return
+          }
+        }
+        await new Promise((r) => setTimeout(r, 700))
+      }
+    })()
+  }, [])
 
   const handleSaveMemory = async (m: Memory) => {
     if (!place) return
@@ -1507,6 +1756,7 @@ export default function PlacePage() {
             {navItem("memories", `Memories ${memories.length > 0 ? `(${memories.length})` : ""}`)}
             {navItem("contributors", "Contributors")}
             {navItem("about", "About")}
+            {!isCloud && navItem("share", "Share")}
             {canWrite && (
             <button
               onClick={() => {
@@ -1537,6 +1787,7 @@ export default function PlacePage() {
               loading={!splatLoaded}
               onSurfacePick={canWrite ? handleSurfacePick : undefined}
               onWorldPick={canWrite ? handleWorldPick : undefined}
+              onCaptureReady={handleCaptureReady}
               renderSceneExtras={
                 <>
                   {splatUrl &&
@@ -1717,13 +1968,13 @@ export default function PlacePage() {
               sharing={sharing}
               onEnableSharing={async () => {
                 if (!cloudUser) {
-                  setPanel("about")
+                  setPanel("share")
                   return
                 }
                 setSharing(true)
                 try {
                   const splatBlob = await getSplatBlob(place.id)
-                  const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, false)
+                  const result = await syncPlaceToCloud(place, loadMemories(place.id), splatBlob, "private")
                   const updated = { ...place, cloudId: result.cloudId }
                   savePlace(updated)
                   setPlace(updated)
@@ -1732,6 +1983,15 @@ export default function PlacePage() {
                   setSharing(false)
                 }
               }}
+            />
+          )}
+
+          {!picking && panel === "share" && (
+            <SharePanel
+              place={place}
+              collab={collab}
+              onPlaceChange={setPlace}
+              reloadCollab={reloadCollab}
             />
           )}
 

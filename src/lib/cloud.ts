@@ -73,12 +73,18 @@ export async function completeSignIn(): Promise<boolean> {
 
 /* ---------------- Publishing ---------------- */
 
+/** Who can reach a synced place:
+ *  "private" → only the owner and invited members.
+ *  "link"    → anyone with the link can read it, anonymously; not listed anywhere.
+ *  "listed"  → anonymously readable AND shown in the public archive directory. */
+export type PlaceVisibility = "private" | "link" | "listed"
+
 export interface PublishResult {
   cloudId: string
   splatUrl: string | null
 }
 
-function mapPlaceToRow(place: Place, ownerId: string) {
+function mapPlaceToRow(place: Place, ownerId: string, visibility: PlaceVisibility) {
   const row: Record<string, unknown> = {
     owner_id: ownerId,
     name: place.name,
@@ -90,7 +96,8 @@ function mapPlaceToRow(place: Place, ownerId: string) {
     cover_url: place.coverImageUrl ?? null,
     splat_name: place.splatName ?? null,
     splat_format: place.splatFormat ?? null,
-    is_public: true,
+    is_public: visibility !== "private",
+    is_listed: visibility === "listed",
   }
   return row
 }
@@ -155,15 +162,16 @@ function uploadWithProgress(
 }
 
 /** Sync a local place to the cloud (create or update).
- *  makePublic=false → shared privately with invited members only.
- *  makePublic=true  → listed in the public archive.
+ *  visibility="private" → shared privately with invited members only.
+ *  visibility="link"    → anyone with the link can read it; not listed.
+ *  visibility="listed"  → anonymously readable and listed in the archive.
  *  First sync copies the memories; afterwards the cloud copy is the
  *  source of truth (owner + contributors write to it directly). */
 export async function syncPlaceToCloud(
   place: Place,
   memories: Memory[],
   splatBlob: Blob | null,
-  makePublic: boolean,
+  visibility: PlaceVisibility,
   onProgress?: SyncProgress
 ): Promise<PublishResult> {
   const supabase = getSupabase()
@@ -177,8 +185,7 @@ export async function syncPlaceToCloud(
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
 
   const existingId = place.cloudId
-  const row = mapPlaceToRow(place, user.id)
-  row.is_public = makePublic
+  const row = mapPlaceToRow(place, user.id, visibility)
 
   // Honest size check before starting — free plan caps uploads at 50 MB
   const bigFile = [splatBlob, place.coverImageUrl?.startsWith("data:")
@@ -248,14 +255,23 @@ export async function syncPlaceToCloud(
   return { cloudId, splatUrl: splatUrl ?? null }
 }
 
-/** Publish (list publicly) or unpublish (keep cloud-shared, hide from archive). */
+/** Turn the read-only share link on or off (is_public). */
 export async function setPlacePublic(cloudId: string, isPublic: boolean): Promise<void> {
   const supabase = getSupabase()
   const { error } = await supabase.from("places").update({ is_public: isPublic }).eq("id", cloudId)
   if (error) throw new Error(`update failed: ${error.message}`)
 }
 
-/** Update a cloud place's details (owner only). */
+/** List in or remove from the public archive (is_listed). Listing implies a readable link. */
+export async function setPlaceListed(cloudId: string, isListed: boolean): Promise<void> {
+  const supabase = getSupabase()
+  const patch = isListed ? { is_public: true, is_listed: true } : { is_listed: false }
+  const { error } = await supabase.from("places").update(patch).eq("id", cloudId)
+  if (error) throw new Error(`update failed: ${error.message}`)
+}
+
+/** Update a cloud place's details (owner only).
+ *  Pass coverUrl to replace the cover (a public URL) or clear it (null). Omit to leave it alone. */
 export async function updateCloudPlace(
   cloudId: string,
   fields: {
@@ -265,21 +281,42 @@ export async function updateCloudPlace(
     startYear: number
     endYear: number
     endOpen: boolean
+    coverUrl?: string | null
   }
 ): Promise<void> {
   const supabase = getSupabase()
-  const { error } = await supabase
-    .from("places")
-    .update({
-      name: fields.name,
-      location: fields.location,
-      description: fields.description,
-      start_year: fields.startYear,
-      end_year: fields.endYear,
-      end_open: fields.endOpen,
-    })
-    .eq("id", cloudId)
+  const patch: Record<string, unknown> = {
+    name: fields.name,
+    location: fields.location,
+    description: fields.description,
+    start_year: fields.startYear,
+    end_year: fields.endYear,
+    end_open: fields.endOpen,
+  }
+  if ("coverUrl" in fields) patch.cover_url = fields.coverUrl
+  const { error } = await supabase.from("places").update(patch).eq("id", cloudId)
   if (error) throw new Error(`update failed: ${error.message}`)
+}
+
+/** Upload a downscaled cover (data URL) to the `covers` bucket; returns its public URL.
+ *  Reuses syncPlaceToCloud's object path so a replacement overwrites in place — storage has
+ *  no delete policy, so a fresh path would orphan the previous file. */
+export async function uploadCloudCover(placeId: string, dataUrl: string): Promise<string> {
+  const supabase = getSupabase()
+  const { data: userData } = await supabase.auth.getUser()
+  const user = userData.user
+  if (!user) throw new Error("sign in first")
+  const { data: session } = await supabase.auth.getSession()
+  const jwt = session.session?.access_token ?? ""
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
+
+  const blob = await (await fetch(dataUrl)).blob()
+  if (blob.size > MAX_UPLOAD_BYTES) throw new Error("the cover image is too large")
+
+  const path = `${user.id}/${placeId}-cover.jpg`
+  await uploadWithProgress(supabaseUrl, jwt, anonKey, "covers", path, blob, "image/jpeg", () => {})
+  return supabase.storage.from("covers").getPublicUrl(path).data.publicUrl
 }
 
 /** Remove a published place from the public archive (local copy stays). */
@@ -302,6 +339,8 @@ export interface PlaceCollab {
   members: Array<{ name: string; email: string; role: "contributor" | "viewer"; userId: string }>
   invites: PlaceInvite[]
   isOwner: boolean
+  isPublic: boolean
+  isListed: boolean
 }
 
 /** Invite someone by email: stores the invite (pending) and sends the email. */
@@ -359,7 +398,7 @@ export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
 
   const { data: place } = await supabase
     .from("places")
-    .select("owner_id")
+    .select("owner_id, is_public, is_listed")
     .eq("id", cloudId)
     .single()
 
@@ -391,6 +430,8 @@ export async function fetchCollab(cloudId: string): Promise<PlaceCollab> {
     })),
     invites,
     isOwner,
+    isPublic: (place?.is_public as boolean) ?? false,
+    isListed: (place?.is_listed as boolean) ?? false,
   }
 }
 
@@ -418,12 +459,12 @@ export async function getInvitePreview(token: string): Promise<InvitePreview | n
 }
 
 /** Signed-in user's cloud places — owned or shared with them (RLS-scoped). */
-export async function fetchMyCloudPlaces(): Promise<Array<PublicPlaceCard & { isPublic: boolean; ownerId: string }>> {
+export async function fetchMyCloudPlaces(): Promise<Array<PublicPlaceCard & { isPublic: boolean; isListed: boolean; ownerId: string }>> {
   if (!isCloudConfigured()) return []
   const supabase = getSupabase()
   const { data, error } = await supabase
     .from("places")
-    .select("id, owner_id, name, location, description, start_year, end_year, end_open, cover_url, splat_url, is_public, created_at, memories(count), place_members(count)")
+    .select("id, owner_id, name, location, description, start_year, end_year, end_open, cover_url, splat_url, is_public, is_listed, created_at, memories(count), place_members(count)")
     .order("created_at", { ascending: false })
     .limit(100)
   if (error) throw new Error(error.message)
@@ -442,6 +483,7 @@ export async function fetchMyCloudPlaces(): Promise<Array<PublicPlaceCard & { is
     contributorCount: ((r.place_members as Array<{ count: number }> | null)?.[0]?.count) ?? 0,
     createdAt: new Date(r.created_at as string).getTime(),
     isPublic: (r.is_public as boolean) ?? false,
+    isListed: (r.is_listed as boolean) ?? false,
   }))
 }
 
